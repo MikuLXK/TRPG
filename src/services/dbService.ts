@@ -33,6 +33,11 @@ interface GameDB extends DBSchema {
 const DB_NAME = 'TRPG_Game_DB';
 const DB_VERSION = 3;
 
+const API_BASE =
+  typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port !== '3000'
+    ? 'http://localhost:3000'
+    : '';
+
 class DBService {
   private dbPromise: Promise<IDBPDatabase<GameDB>>;
 
@@ -135,7 +140,6 @@ class DBService {
   }
 
   async registerUser(username: string, password: string) {
-    const db = await this.dbPromise;
     const normalized = username.trim();
     if (!normalized) {
       throw new Error('用户名不能为空');
@@ -144,11 +148,20 @@ class DBService {
       throw new Error('密码不能为空');
     }
 
-    const existing = await db.get('users', normalized);
-    if (existing) {
-      throw new Error('用户名已存在');
+    const response = await fetch(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username: normalized, password }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: '注册失败' }));
+      throw new Error(payload.error || '注册失败');
     }
 
+    const db = await this.dbPromise;
     await db.put('users', {
       username: normalized,
       password,
@@ -157,13 +170,31 @@ class DBService {
   }
 
   async loginUser(username: string, password: string) {
-    const db = await this.dbPromise;
     const normalized = username.trim();
-    const user = await db.get('users', normalized);
-    if (!user || user.password !== password) {
-      throw new Error('用户名或密码错误');
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username: normalized, password }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: '用户名或密码错误' }));
+      throw new Error(payload.error || '用户名或密码错误');
     }
-    return user;
+
+    const db = await this.dbPromise;
+    const user = await db.get('users', normalized);
+    if (!user) {
+      await db.put('users', {
+        username: normalized,
+        password,
+        createdAt: Date.now(),
+      });
+    }
+
+    return { username: normalized };
   }
 
   async saveUserSetting(username: string, key: string, value: any) {

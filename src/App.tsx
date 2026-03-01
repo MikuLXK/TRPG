@@ -1,21 +1,44 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import GameView from './components/Game/GameView';
 import Home from './components/Home/Home';
 import WaitingRoom from './components/Home/WaitingRoom';
+import AdminPanel from './components/Admin/AdminPanel';
 import { socketService } from './services/socketService';
 import { dbService } from './services/dbService';
+import { adminService } from './services/adminService';
 
 export default function App() {
   const [roomState, setRoomState] = useState<any>(null);
   const [isInGame, setIsInGame] = useState(false);
 
   const AUTH_USER_STORAGE_KEY = 'trpg_authed_user';
+  const ADMIN_USER_STORAGE_KEY = 'trpg_admin_user';
   const [authedUser, setAuthedUser] = useState<string | null>(localStorage.getItem(AUTH_USER_STORAGE_KEY));
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [adminUser, setAdminUser] = useState<string | null>(localStorage.getItem(ADMIN_USER_STORAGE_KEY));
+
+  useEffect(() => {
+    const token = adminService.getToken();
+    if (!token) return;
+
+    void adminService.me()
+      .then(({ user }) => {
+        localStorage.setItem(ADMIN_USER_STORAGE_KEY, user.username);
+        setAdminUser(user.username);
+        setIsAdminMode(true);
+      })
+      .catch(() => {
+        adminService.clearToken();
+        localStorage.removeItem(ADMIN_USER_STORAGE_KEY);
+        setAdminUser(null);
+      });
+  }, []);
 
   useEffect(() => {
     // Connect socket on mount
@@ -91,6 +114,102 @@ export default function App() {
     setAuthError('');
   };
 
+  const handleAdminLogin = async () => {
+    const username = authUsername.trim();
+    if (!username) {
+      setAuthError('请输入管理员用户名');
+      return;
+    }
+    if (!authPassword) {
+      setAuthError('请输入管理员密码');
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const result = await adminService.login(username, authPassword);
+      localStorage.setItem(ADMIN_USER_STORAGE_KEY, result.user.username);
+      setAdminUser(result.user.username);
+      setAuthPassword('');
+    } catch (error) {
+      setAuthError(String((error as Error)?.message || '管理员登录失败'));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleAdminLogout = () => {
+    adminService.clearToken();
+    localStorage.removeItem(ADMIN_USER_STORAGE_KEY);
+    setAdminUser(null);
+    setIsAdminMode(false);
+    setAuthPassword('');
+    setAuthError('');
+  };
+
+  if (isAdminMode) {
+    if (!adminUser) {
+      return (
+        <div className="w-full h-screen bg-zinc-950 text-zinc-200 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl">
+            <h1 className="text-2xl font-bold text-amber-500 mb-2">TRPG 管理端登录</h1>
+            <p className="text-xs text-zinc-500 mb-6">使用管理员账号登录后可管理用户、剧本、房间与日志。</p>
+
+            <div className="space-y-3">
+              <input
+                type="text"
+                autoComplete="username"
+                value={authUsername}
+                onChange={(e) => setAuthUsername(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-amber-500"
+                placeholder="管理员用户名"
+              />
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    void handleAdminLogin();
+                  }
+                }}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-amber-500"
+                placeholder="管理员密码"
+              />
+            </div>
+
+            {authError && <div className="mt-3 text-xs text-red-400">{authError}</div>}
+
+            <button
+              type="button"
+              disabled={authLoading}
+              onClick={() => void handleAdminLogin()}
+              className="mt-5 w-full py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 rounded-lg font-bold text-sm"
+            >
+              {authLoading ? '处理中...' : '登录管理端'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdminMode(false);
+                setAuthError('');
+              }}
+              className="mt-3 w-full py-2.5 border border-zinc-700 hover:bg-zinc-800 rounded-lg text-sm"
+            >
+              返回玩家登录
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return <AdminPanel adminUsername={adminUser} onLogout={handleAdminLogout} />;
+  }
+
   if (!authedUser) {
     return (
       <div className="w-full h-screen bg-zinc-950 text-zinc-200 flex items-center justify-center p-4">
@@ -158,6 +277,17 @@ export default function App() {
             className="mt-5 w-full py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 rounded-lg font-bold text-sm"
           >
             {authLoading ? '处理中...' : authMode === 'login' ? '登录并进入' : '注册并进入'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setIsAdminMode(true);
+              setAuthError('');
+            }}
+            className="mt-3 w-full py-2.5 border border-zinc-700 hover:bg-zinc-800 rounded-lg text-sm"
+          >
+            进入管理端
           </button>
         </div>
       </div>

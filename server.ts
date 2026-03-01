@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import ViteExpress from "vite-express";
@@ -6,7 +6,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { promises as fs } from "fs";
-import { getScriptById } from "./src/data/scripts";
+import { existsSync } from "fs";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { SCRIPT_LIBRARY } from "./src/data/scripts";
 import type {
   CharacterAttributeBlock,
   PlayerCharacterProfile,
@@ -149,6 +151,255 @@ const defaultAISettings: PlayerAISettings = {
 
 const rooms: Record<string, Room> = {};
 const socketRoomIndex: Record<string, string> = {};
+
+type AdminUserStatus = "active" | "disabled";
+type AdminUserRole = "player" | "moderator";
+
+interface ManagedUser {
+  username: string;
+  password: string;
+  createdAt: number;
+  status: AdminUserStatus;
+  role: AdminUserRole;
+  lastLoginAt: number | null;
+}
+
+interface ManagedScript extends ScriptDefinition {
+  source: "builtin" | "admin";
+  isPublished: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface AdminLogEntry {
+  id: string;
+  timestamp: number;
+  operator: string;
+  action: string;
+  targetType: "user" | "script" | "room" | "system";
+  targetId: string;
+  details?: Record<string, unknown>;
+}
+
+interface AdminDataStore {
+  users: ManagedUser[];
+  scripts: ManagedScript[];
+  logs: AdminLogEntry[];
+}
+
+interface AuthPayload {
+  username: string;
+  role: "admin" | "player";
+  exp: number;
+}
+
+const ADMIN_DATA_DIR = path.resolve(process.cwd(), "data");
+const ADMIN_DATA_FILE = path.resolve(ADMIN_DATA_DIR, "admin-data.json");
+const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || randomBytes(32).toString("hex");
+const ADMIN_DEFAULT_USERNAME = (process.env.ADMIN_USERNAME || "admin").trim();
+const ADMIN_DEFAULT_PASSWORD = process.env.ADMIN_PASSWORD || "admin123456";
+const PLAYER_TOKEN_SECRET = process.env.PLAYER_TOKEN_SECRET || randomBytes(32).toString("hex");
+const PLAYER_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const ADMIN_TOKEN_TTL_SECONDS = 24 * 60 * 60;
+
+const createBuiltinManagedScripts = (): ManagedScript[] => {
+  const now = Date.now();
+  return SCRIPT_LIBRARY.map((script) => ({
+    ...script,
+    source: "builtin",
+    isPublished: true,
+    createdAt: now,
+    updatedAt: now
+  }));
+};
+
+const adminState: AdminDataStore = {
+  users: [],
+  scripts: createBuiltinManagedScripts(),
+  logs: []
+};
+
+const addAdminLog = (
+  operator: string,
+  action: string,
+  targetType: AdminLogEntry["targetType"],
+  targetId: string,
+  details?: Record<string, unknown>
+) => {
+  adminState.logs.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+    operator,
+    action,
+    targetType,
+    targetId,
+    details
+  });
+  if (adminState.logs.length > 2000) {
+    adminState.logs = adminState.logs.slice(0, 2000);
+  }
+};
+
+const sha256 = (text: string) => createHmac("sha256", "trpg-password-hash").update(text).digest("hex");
+
+const signToken = (payload: AuthPayload, secret: string) => {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sign = createHmac("sha256", secret).update(body).digest("base64url");
+  return `${body}.${sign}`;
+};
+
+const verifyToken = (token: string, secret: string): AuthPayload | null => {
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [body, sign] = parts;
+  const expected = createHmac("sha256", secret).update(body).digest("base64url");
+  try {
+    if (!timingSafeEqual(Buffer.from(sign), Buffer.from(expected))) return null;
+  } catch {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as AuthPayload;
+    if (!payload?.username || !payload?.role || !payload?.exp) return null;
+    if (Date.now() >= payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
+const getBearerToken = (authHeader: string | undefined) => {
+  if (!authHeader) return "";
+  const [scheme, token] = authHeader.split(" ");
+  if (!scheme || scheme.toLowerCase() !== "bearer" || !token) return "";
+  return token.trim();
+};
+
+const persistAdminState = async () => {
+  await fs.mkdir(ADMIN_DATA_DIR, { recursive: true });
+  await fs.writeFile(ADMIN_DATA_FILE, JSON.stringify(adminState, null, 2), "utf8");
+};
+
+const ensureDefaultAdminUser = () => {
+  const hasAdmin = adminState.users.some((user) => user.role === "moderator" && user.username === ADMIN_DEFAULT_USERNAME);
+  if (hasAdmin) return;
+  adminState.users.push({
+    username: ADMIN_DEFAULT_USERNAME,
+    password: sha256(ADMIN_DEFAULT_PASSWORD),
+    createdAt: Date.now(),
+    status: "active",
+    role: "moderator",
+    lastLoginAt: null
+  });
+};
+
+const normalizeManagedScripts = (scripts: ManagedScript[]) => {
+  const byId = new Map<string, ManagedScript>();
+  createBuiltinManagedScripts().forEach((script) => byId.set(script.id, script));
+  scripts.forEach((script) => {
+    if (!script?.id) return;
+    byId.set(script.id, {
+      ...script,
+      isPublished: script.isPublished ?? true,
+      source: script.source ?? "admin",
+      createdAt: Number.isFinite(script.createdAt) ? script.createdAt : Date.now(),
+      updatedAt: Number.isFinite(script.updatedAt) ? script.updatedAt : Date.now()
+    });
+  });
+  adminState.scripts = Array.from(byId.values());
+};
+
+const findRuntimeScript = (scriptId: string) => {
+  return adminState.scripts.find((script) => script.id === scriptId && script.isPublished);
+};
+
+const sanitizeScriptInput = (input: Partial<ScriptDefinition>): ScriptDefinition => {
+  const now = Date.now();
+  const toList = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
+  return {
+    id: String(input.id || "script-" + now),
+    title: String(input.title || "未命名剧本"),
+    description: String(input.description || ""),
+    tags: toList(input.tags),
+    content: String(input.content || ""),
+    settingPrompt: String(input.settingPrompt || ""),
+    finalGoal: String(input.finalGoal || ""),
+    roleTemplates: Array.isArray(input.roleTemplates) ? input.roleTemplates : []
+  };
+};
+
+const initializeAdminState = async () => {
+  try {
+    if (existsSync(ADMIN_DATA_FILE)) {
+      const raw = await fs.readFile(ADMIN_DATA_FILE, "utf8");
+      const parsed = JSON.parse(raw) as Partial<AdminDataStore>;
+
+      if (Array.isArray(parsed.users)) {
+        adminState.users = parsed.users
+          .filter((user): user is ManagedUser => Boolean(user?.username && user?.password && user?.role))
+          .map((user) => ({
+            username: String(user.username).trim(),
+            password: String(user.password),
+            createdAt: Number.isFinite(user.createdAt) ? user.createdAt : Date.now(),
+            status: user.status === "disabled" ? "disabled" : "active",
+            role: user.role === "moderator" ? "moderator" : "player",
+            lastLoginAt: Number.isFinite(user.lastLoginAt) ? Number(user.lastLoginAt) : null
+          }));
+      }
+
+      if (Array.isArray(parsed.scripts)) {
+        normalizeManagedScripts(parsed.scripts as ManagedScript[]);
+      }
+
+      if (Array.isArray(parsed.logs)) {
+        adminState.logs = parsed.logs
+          .filter((log): log is AdminLogEntry => Boolean(log?.id && log?.action && log?.operator && log?.targetType && log?.targetId))
+          .slice(0, 2000);
+      }
+    }
+  } catch (error) {
+    console.error("加载管理端数据失败，使用默认数据:", error);
+  }
+
+  ensureDefaultAdminUser();
+  await persistAdminState();
+};
+
+const adminStateReady = initializeAdminState();
+
+const buildAuthUserResponse = (user: ManagedUser) => ({
+  username: user.username,
+  role: user.role,
+  status: user.status,
+  createdAt: user.createdAt,
+  lastLoginAt: user.lastLoginAt
+});
+
+const issueAdminToken = (username: string) => signToken({
+  username,
+  role: "admin",
+  exp: Date.now() + ADMIN_TOKEN_TTL_SECONDS * 1000
+}, ADMIN_TOKEN_SECRET);
+
+const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  await adminStateReady;
+  const token = getBearerToken(req.headers.authorization);
+  const payload = verifyToken(token, ADMIN_TOKEN_SECRET);
+  if (!payload || payload.role !== "admin") {
+    res.status(401).json({ error: "管理员身份无效或已过期" });
+    return;
+  }
+
+  const user = adminState.users.find((item) => item.username === payload.username && item.role === "moderator");
+  if (!user || user.status === "disabled") {
+    res.status(403).json({ error: "管理员账户不可用" });
+    return;
+  }
+
+  (req as Request & { adminUser?: ManagedUser }).adminUser = user;
+  next();
+};
 
 const generateRoomId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -835,7 +1086,7 @@ io.on("connection", (socket) => {
     const scriptFromPayload = data.scriptPayload && data.scriptPayload.id === data.scriptId
       ? data.scriptPayload
       : undefined;
-    const script = scriptFromPayload || getScriptById(data.scriptId);
+    const script = scriptFromPayload || findRuntimeScript(data.scriptId);
     if (!script) {
       socket.emit("error", "无效剧本");
       return;
@@ -1494,6 +1745,104 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+app.get("/api/scripts", async (_req, res) => {
+  await adminStateReady;
+  const scripts = adminState.scripts
+    .filter((script) => script.isPublished)
+    .map((script) => ({
+      id: script.id,
+      title: script.title,
+      description: script.description,
+      tags: script.tags,
+      content: script.content,
+      settingPrompt: script.settingPrompt,
+      finalGoal: script.finalGoal,
+      roleTemplates: script.roleTemplates
+    }));
+  res.json({ scripts });
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  await adminStateReady;
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+
+  if (!username) {
+    res.status(400).json({ error: "用户名不能为空" });
+    return;
+  }
+  if (!password) {
+    res.status(400).json({ error: "密码不能为空" });
+    return;
+  }
+
+  const exists = adminState.users.some((user) => user.username === username);
+  if (exists) {
+    res.status(400).json({ error: "用户名已存在" });
+    return;
+  }
+
+  const now = Date.now();
+  const user: ManagedUser = {
+    username,
+    password: sha256(password),
+    createdAt: now,
+    status: "active",
+    role: "player",
+    lastLoginAt: now
+  };
+
+  adminState.users.push(user);
+  addAdminLog("system", "register_user", "user", username);
+  await persistAdminState();
+
+  res.json({
+    user: {
+      username: user.username,
+      role: user.role,
+      status: user.status,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt
+    }
+  });
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  await adminStateReady;
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+
+  if (!username || !password) {
+    res.status(400).json({ error: "请输入用户名和密码" });
+    return;
+  }
+
+  const user = adminState.users.find((item) => item.username === username);
+  if (!user || user.password !== sha256(password)) {
+    res.status(401).json({ error: "用户名或密码错误" });
+    return;
+  }
+
+  if (user.status === "disabled") {
+    res.status(403).json({ error: "该账号已被禁用" });
+    return;
+  }
+
+  user.lastLoginAt = Date.now();
+  addAdminLog(username, "player_login", "user", username);
+  await persistAdminState();
+
+  res.json({
+    user: {
+      username: user.username,
+      role: user.role,
+      status: user.status,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt
+    }
+  });
+});
+
 app.get("/api/prompts/defaults", async (_req, res) => {
   const data: Record<AIFunctionType, Record<PromptRole, string>> = {
     actionCollector: { system: "", user: "", model: "" },
@@ -1572,6 +1921,349 @@ app.post("/api/models", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: `模型获取异常: ${String((error as Error)?.message ?? error)}` });
   }
+});
+
+app.post("/api/admin/login", async (req, res) => {
+  await adminStateReady;
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+
+  if (!username || !password) {
+    res.status(400).json({ error: "请输入用户名和密码" });
+    return;
+  }
+
+  const user = adminState.users.find((item) => item.username === username && item.role === "moderator");
+  if (!user || user.password !== sha256(password)) {
+    res.status(401).json({ error: "用户名或密码错误" });
+    return;
+  }
+
+  if (user.status === "disabled") {
+    res.status(403).json({ error: "该管理员账户已被禁用" });
+    return;
+  }
+
+  user.lastLoginAt = Date.now();
+  addAdminLog(user.username, "admin_login", "system", user.username);
+  await persistAdminState();
+
+  res.json({
+    token: issueAdminToken(user.username),
+    expiresIn: ADMIN_TOKEN_TTL_SECONDS,
+    user: buildAuthUserResponse(user)
+  });
+});
+
+app.get("/api/admin/me", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { adminUser: ManagedUser }).adminUser;
+  res.json({ user: buildAuthUserResponse(user) });
+});
+
+app.get("/api/admin/dashboard", requireAdmin, async (_req, res) => {
+  await adminStateReady;
+  const allRooms = Object.values(rooms);
+  const activeRooms = allRooms.filter((room) => getActivePlayers(room).length > 0);
+
+  res.json({
+    users: {
+      total: adminState.users.length,
+      active: adminState.users.filter((user) => user.status === "active").length,
+      disabled: adminState.users.filter((user) => user.status === "disabled").length,
+      moderators: adminState.users.filter((user) => user.role === "moderator").length
+    },
+    scripts: {
+      total: adminState.scripts.length,
+      published: adminState.scripts.filter((script) => script.isPublished).length,
+      builtin: adminState.scripts.filter((script) => script.source === "builtin").length,
+      custom: adminState.scripts.filter((script) => script.source === "admin").length
+    },
+    rooms: {
+      total: allRooms.length,
+      active: activeRooms.length,
+      waiting: allRooms.filter((room) => room.status === "waiting").length,
+      processing: allRooms.filter((room) => room.status !== "waiting").length,
+      onlinePlayers: allRooms.reduce((count, room) => count + getActivePlayers(room).length, 0)
+    },
+    recentLogs: adminState.logs.slice(0, 10)
+  });
+});
+
+app.get("/api/admin/users", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const query = String(req.query.q || "").trim().toLowerCase();
+  const status = String(req.query.status || "").trim() as AdminUserStatus | "";
+  const role = String(req.query.role || "").trim() as AdminUserRole | "";
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 10));
+
+  let list = [...adminState.users];
+  if (query) list = list.filter((user) => user.username.toLowerCase().includes(query));
+  if (status === "active" || status === "disabled") list = list.filter((user) => user.status === status);
+  if (role === "player" || role === "moderator") list = list.filter((user) => user.role === role);
+
+  list.sort((a, b) => b.createdAt - a.createdAt);
+  const total = list.length;
+  const start = (page - 1) * pageSize;
+
+  res.json({
+    rows: list.slice(start, start + pageSize).map(buildAuthUserResponse),
+    total,
+    page,
+    pageSize
+  });
+});
+
+app.patch("/api/admin/users/:username", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const username = String(req.params.username || "").trim();
+  const target = adminState.users.find((user) => user.username === username);
+
+  if (!target) {
+    res.status(404).json({ error: "用户不存在" });
+    return;
+  }
+
+  const nextStatus = req.body?.status as AdminUserStatus | undefined;
+  const nextRole = req.body?.role as AdminUserRole | undefined;
+  const nextPassword = typeof req.body?.password === "string" ? req.body.password : "";
+
+  if (nextStatus && nextStatus !== "active" && nextStatus !== "disabled") {
+    res.status(400).json({ error: "status 参数无效" });
+    return;
+  }
+  if (nextRole && nextRole !== "player" && nextRole !== "moderator") {
+    res.status(400).json({ error: "role 参数无效" });
+    return;
+  }
+
+  if (target.username === operator.username) {
+    if (nextStatus === "disabled") {
+      res.status(400).json({ error: "不能禁用当前登录管理员" });
+      return;
+    }
+    if (nextRole === "player") {
+      res.status(400).json({ error: "不能降级当前登录管理员" });
+      return;
+    }
+  }
+
+  if (nextStatus) target.status = nextStatus;
+  if (nextRole) target.role = nextRole;
+  if (nextPassword) {
+    if (nextPassword.length < 6) {
+      res.status(400).json({ error: "新密码长度至少 6 位" });
+      return;
+    }
+    target.password = sha256(nextPassword);
+  }
+
+  addAdminLog(operator.username, "update_user", "user", target.username, {
+    status: target.status,
+    role: target.role,
+    passwordReset: Boolean(nextPassword)
+  });
+
+  await persistAdminState();
+  res.json({ user: buildAuthUserResponse(target) });
+});
+
+app.get("/api/admin/scripts", requireAdmin, async (_req, res) => {
+  await adminStateReady;
+  const rows = [...adminState.scripts].sort((a, b) => b.updatedAt - a.updatedAt);
+  res.json({ rows });
+});
+
+app.post("/api/admin/scripts", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const base = sanitizeScriptInput(req.body || {});
+  const scriptId = String(base.id || "").trim();
+
+  if (!scriptId) {
+    res.status(400).json({ error: "剧本 ID 不能为空" });
+    return;
+  }
+
+  if (adminState.scripts.some((script) => script.id === scriptId)) {
+    res.status(400).json({ error: "剧本 ID 已存在" });
+    return;
+  }
+
+  if (!Array.isArray(base.roleTemplates) || base.roleTemplates.length === 0) {
+    res.status(400).json({ error: "剧本至少需要一个角色模板" });
+    return;
+  }
+
+  const now = Date.now();
+  const script: ManagedScript = {
+    ...base,
+    id: scriptId,
+    source: "admin",
+    isPublished: req.body?.isPublished !== false,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  adminState.scripts.push(script);
+  addAdminLog(operator.username, "create_script", "script", script.id, { title: script.title });
+  await persistAdminState();
+
+  res.json({ script });
+});
+
+app.put("/api/admin/scripts/:id", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const id = String(req.params.id || "").trim();
+  const index = adminState.scripts.findIndex((script) => script.id === id);
+
+  if (index < 0) {
+    res.status(404).json({ error: "剧本不存在" });
+    return;
+  }
+
+  const current = adminState.scripts[index];
+  const base = sanitizeScriptInput({ ...current, ...req.body, id: current.id });
+
+  if (!Array.isArray(base.roleTemplates) || base.roleTemplates.length === 0) {
+    res.status(400).json({ error: "剧本至少需要一个角色模板" });
+    return;
+  }
+
+  const next: ManagedScript = {
+    ...base,
+    id: current.id,
+    source: current.source,
+    isPublished: typeof req.body?.isPublished === "boolean" ? req.body.isPublished : current.isPublished,
+    createdAt: current.createdAt,
+    updatedAt: Date.now()
+  };
+
+  adminState.scripts[index] = next;
+  addAdminLog(operator.username, "update_script", "script", id, { title: next.title });
+  await persistAdminState();
+
+  res.json({ script: next });
+});
+
+app.patch("/api/admin/scripts/:id/publish", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const id = String(req.params.id || "").trim();
+  const script = adminState.scripts.find((item) => item.id === id);
+
+  if (!script) {
+    res.status(404).json({ error: "剧本不存在" });
+    return;
+  }
+
+  script.isPublished = Boolean(req.body?.isPublished);
+  script.updatedAt = Date.now();
+  addAdminLog(operator.username, script.isPublished ? "publish_script" : "unpublish_script", "script", id);
+  await persistAdminState();
+
+  res.json({ script });
+});
+
+app.delete("/api/admin/scripts/:id", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const id = String(req.params.id || "").trim();
+  const index = adminState.scripts.findIndex((script) => script.id === id);
+
+  if (index < 0) {
+    res.status(404).json({ error: "剧本不存在" });
+    return;
+  }
+
+  if (adminState.scripts[index].source === "builtin") {
+    res.status(400).json({ error: "内置剧本不允许删除" });
+    return;
+  }
+
+  adminState.scripts.splice(index, 1);
+  addAdminLog(operator.username, "delete_script", "script", id);
+  await persistAdminState();
+
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/rooms", requireAdmin, async (_req, res) => {
+  await adminStateReady;
+  const rows = Object.values(rooms).map((room) => ({
+    id: room.id,
+    name: room.name,
+    scriptId: room.scriptId,
+    scriptTitle: room.script.title,
+    hostId: room.hostId,
+    status: room.status,
+    hasStarted: room.hasStarted,
+    players: room.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      accountUsername: player.accountUsername,
+      isOnline: player.isOnline,
+      isReady: player.isReady
+    })),
+    activePlayers: getActivePlayers(room).length,
+    maxPlayers: room.maxPlayers,
+    currentRound: room.currentRound,
+    logCount: room.logs.length
+  }));
+
+  res.json({ rows });
+});
+
+app.post("/api/admin/rooms/:id/force-close", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const id = String(req.params.id || "").trim();
+  const room = rooms[id];
+
+  if (!room) {
+    res.status(404).json({ error: "房间不存在" });
+    return;
+  }
+
+  room.players.forEach((player) => {
+    delete socketRoomIndex[player.id];
+    io.sockets.sockets.get(player.id)?.leave(id);
+  });
+  delete rooms[id];
+  io.emit("rooms_list_updated");
+
+  addAdminLog(operator.username, "force_close_room", "room", id, { roomName: room.name });
+  await persistAdminState();
+
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/logs", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const query = String(req.query.q || "").trim().toLowerCase();
+  const targetType = String(req.query.targetType || "").trim();
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+
+  let rows = [...adminState.logs];
+  if (query) {
+    rows = rows.filter((log) => {
+      const haystack = `${log.operator} ${log.action} ${log.targetId} ${JSON.stringify(log.details || {})}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+  if (["user", "script", "room", "system"].includes(targetType)) {
+    rows = rows.filter((log) => log.targetType === targetType);
+  }
+
+  const total = rows.length;
+  const start = (page - 1) * pageSize;
+  rows = rows.slice(start, start + pageSize);
+
+  res.json({ rows, total, page, pageSize });
 });
 
 httpServer.listen(PORT, "0.0.0.0", () => {

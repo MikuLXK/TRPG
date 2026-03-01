@@ -28,7 +28,6 @@ app.use(express.json());
 type AIFunctionType = "actionCollector" | "mainStory" | "stateProcessor";
 type PromptRole = "system" | "user" | "model";
 type AIProviderType = "openai" | "gemini" | "deepseek" | "claude" | "openaiCompatible";
-
 type RoomStatus = "waiting" | "playing" | "processing" | "story_generation" | "settlement";
 
 interface AIConnectionConfig {
@@ -84,15 +83,15 @@ const FUNCTION_TYPES: AIFunctionType[] = ["actionCollector", "mainStory", "state
 
 const PROVIDER_DEFAULT_ENDPOINTS: Record<AIProviderType, string> = {
   openai: "https://api.openai.com/v1",
-  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+  gemini: "https://generativelanguage.googleapis.com/v1beta",
   deepseek: "https://api.deepseek.com/v1",
   claude: "https://api.anthropic.com/v1",
-  openaiCompatible: "https://api.openai.com/v1"
+  openaiCompatible: ""
 };
 
 const defaultAISettings: PlayerAISettings = {
-  defaultProvider: "openai",
-  defaultEndpoint: PROVIDER_DEFAULT_ENDPOINTS.openai,
+  defaultProvider: "openaiCompatible",
+  defaultEndpoint: "",
   defaultApiKey: "",
   actionCollector: {
     connection: { provider: "", endpoint: "", apiKey: "", model: "gpt-4o-mini" },
@@ -150,11 +149,11 @@ const safeJsonParse = <T>(text: string): T | null => {
 const normalizeEndpoint = (endpoint: string) => endpoint.replace(/\/+$/, "");
 
 const getProviderForConnection = (settings: PlayerAISettings, conn: AIConnectionConfig): AIProviderType => {
-  return (conn.provider || settings.defaultProvider || "openai") as AIProviderType;
+  return (conn.provider || settings.defaultProvider || "openaiCompatible") as AIProviderType;
 };
 
 const getEndpointForConnection = (provider: AIProviderType, settings: PlayerAISettings, conn: AIConnectionConfig): string => {
-  return conn.endpoint || settings.defaultEndpoint || PROVIDER_DEFAULT_ENDPOINTS[provider];
+  return conn.endpoint || settings.defaultEndpoint || PROVIDER_DEFAULT_ENDPOINTS[provider] || "";
 };
 
 const getApiKeyForConnection = (settings: PlayerAISettings, conn: AIConnectionConfig): string => {
@@ -182,7 +181,7 @@ const getChatCompletionsUrl = (provider: AIProviderType, endpoint: string) => {
 
 const getModelsUrl = (provider: AIProviderType, endpoint: string) => {
   const normalized = normalizeEndpoint(endpoint);
-  if (provider === "claude") return `${normalized}/models`;
+  if (provider === "gemini") return `${normalized}/models`;
   return `${normalized}/models`;
 };
 
@@ -192,6 +191,11 @@ const buildAuthHeaders = (provider: AIProviderType, apiKey: string): Record<stri
     return {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01"
+    };
+  }
+  if (provider === "gemini") {
+    return {
+      "x-goog-api-key": apiKey
     };
   }
   return {
@@ -205,6 +209,15 @@ const extractTextFromResponse = (provider: AIProviderType, payload: any): string
       return payload.content.map((part: any) => (typeof part?.text === "string" ? part.text : "")).join("\n");
     }
     return "";
+  }
+
+  if (provider === "gemini") {
+    const textByCandidates = Array.isArray(payload?.candidates)
+      ? payload.candidates
+          .map((c: any) => c?.content?.parts?.map((p: any) => p?.text ?? "").join("\n") ?? "")
+          .join("\n")
+      : "";
+    if (textByCandidates) return textByCandidates;
   }
 
   const choice = payload?.choices?.[0];
@@ -233,6 +246,47 @@ const callChatCompletion = async (args: {
   userPrompt: string;
   modelPrompt: string;
 }) => {
+  if (!args.endpoint) {
+    throw new Error("Endpoint 不能为空");
+  }
+
+  if (args.provider === "gemini") {
+    const geminiUrl = `${normalizeEndpoint(args.endpoint)}/models/${args.model}:generateContent`;
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildAuthHeaders("gemini", args.apiKey)
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: args.systemPrompt }]
+        },
+        generationConfig: {
+          temperature: args.temperature
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: args.userPrompt }]
+          },
+          {
+            role: "model",
+            parts: [{ text: args.modelPrompt }]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini 请求失败(${response.status}): ${errText}`);
+    }
+
+    const payload = await response.json();
+    return extractTextFromResponse("gemini", payload);
+  }
+
   const url = getChatCompletionsUrl(args.provider, args.endpoint);
 
   const openAIMessages = [
@@ -398,14 +452,6 @@ const runStateProcessor = async (room: Room, storyText: string) => {
   return safeJsonParse<{ changes?: any[] }>(output) ?? { changes: [] };
 };
 
-const emitRoomAndListUpdate = (roomId: string) => {
-  const room = rooms[roomId];
-  if (room) {
-    io.to(roomId).emit("room_updated", room);
-  }
-  io.emit("rooms_list_updated");
-};
-
 const removePlayerFromRoom = (socketId: string) => {
   const roomId = socketRoomIndex[socketId];
   if (!roomId) return;
@@ -425,7 +471,8 @@ const removePlayerFromRoom = (socketId: string) => {
     }
   }
 
-  emitRoomAndListUpdate(roomId);
+  io.to(roomId).emit("room_updated", room);
+  io.emit("rooms_list_updated");
 };
 
 const sweepEmptyRooms = () => {
@@ -450,9 +497,7 @@ const sweepEmptyRooms = () => {
     }
   });
 
-  if (changed) {
-    io.emit("rooms_list_updated");
-  }
+  if (changed) io.emit("rooms_list_updated");
 };
 
 setInterval(sweepEmptyRooms, ROOM_SWEEP_INTERVAL_MS);
@@ -603,7 +648,7 @@ io.on("connection", (socket) => {
       ...defaults,
       ...aiSettings,
       defaultProvider: aiSettings.defaultProvider || defaults.defaultProvider,
-      defaultEndpoint: aiSettings.defaultEndpoint || defaults.defaultEndpoint,
+      defaultEndpoint: aiSettings.defaultEndpoint ?? defaults.defaultEndpoint,
       defaultApiKey: aiSettings.defaultApiKey ?? defaults.defaultApiKey,
       actionCollector: {
         ...defaults.actionCollector,
@@ -692,12 +737,16 @@ io.on("connection", (socket) => {
     const player = room.players.find((p) => p.id === socket.id);
     if (!player) return;
 
+    if (player.isReady) return;
+
     player.action = action;
     player.isReady = true;
 
-    const allReady = room.players.every((p) => p.isReady);
-
+    const readyCount = room.players.filter((p) => p.isReady).length;
+    io.to(roomId).emit("turn_progress", { readyCount, total: room.players.length });
     io.to(roomId).emit("room_updated", room);
+
+    const allReady = room.players.length > 0 && room.players.every((p) => p.isReady);
 
     if (allReady) {
       room.status = "processing";
@@ -718,6 +767,8 @@ async function processTurn(roomId: string) {
   if (!room) return;
 
   try {
+    io.to(roomId).emit("story_stream_start");
+
     const groupedActions = await runActionCollector(room);
 
     room.status = "story_generation";
@@ -725,6 +776,13 @@ async function processTurn(roomId: string) {
     io.emit("rooms_list_updated");
 
     const story = await runMainStory(room, groupedActions);
+
+    for (let i = 0; i < story.length; i += 24) {
+      const chunk = story.slice(i, i + 24);
+      io.to(roomId).emit("story_stream_chunk", { chunk });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    io.to(roomId).emit("story_stream_end");
 
     room.status = "settlement";
     io.to(roomId).emit("room_updated", room);
@@ -748,6 +806,7 @@ async function processTurn(roomId: string) {
       p.action = "";
     });
 
+    io.to(roomId).emit("turn_progress", { readyCount: 0, total: room.players.length });
     io.to(roomId).emit("round_complete", {
       room,
       story: story || "本回合没有生成有效剧情。"
@@ -755,11 +814,13 @@ async function processTurn(roomId: string) {
     io.emit("rooms_list_updated");
   } catch (error) {
     console.error("Error processing turn:", error);
+    io.to(roomId).emit("story_stream_end");
     io.to(roomId).emit("error", `AI 处理回合失败: ${String((error as Error)?.message ?? error)}`);
     room.status = "waiting";
     room.players.forEach((p) => {
       p.isReady = false;
     });
+    io.to(roomId).emit("turn_progress", { readyCount: 0, total: room.players.length });
     io.to(roomId).emit("room_updated", room);
     io.emit("rooms_list_updated");
   }
@@ -786,11 +847,11 @@ app.get("/api/prompts/defaults", async (_req, res) => {
 });
 
 app.post("/api/models", async (req, res) => {
-  const provider = String(req.body?.provider || "openai") as AIProviderType;
+  const provider = String(req.body?.provider || "openaiCompatible") as AIProviderType;
   const endpointInput = String(req.body?.endpoint || "").trim();
   const apiKey = String(req.body?.apiKey || "").trim();
 
-  const endpoint = endpointInput || PROVIDER_DEFAULT_ENDPOINTS[provider] || PROVIDER_DEFAULT_ENDPOINTS.openai;
+  const endpoint = endpointInput || PROVIDER_DEFAULT_ENDPOINTS[provider] || "";
 
   if (!endpoint) {
     res.status(400).json({ error: "endpoint is required" });
@@ -798,6 +859,31 @@ app.post("/api/models", async (req, res) => {
   }
 
   try {
+    if (provider === "gemini") {
+      const response = await fetch(getModelsUrl("gemini", endpoint), {
+        method: "GET",
+        headers: {
+          ...buildAuthHeaders("gemini", apiKey)
+        }
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        res.status(response.status).json({ error: detail || "获取Gemini模型失败" });
+        return;
+      }
+
+      const payload = await response.json() as any;
+      const rawList = Array.isArray(payload?.models) ? payload.models : [];
+      const models = rawList.map((m: any) => ({
+        id: String(m.name || "").replace(/^models\//, ""),
+        name: String(m.displayName || m.name || "")
+      })).filter((m: { id: string }) => m.id);
+
+      res.json({ models });
+      return;
+    }
+
     const response = await fetch(getModelsUrl(provider, endpoint), {
       method: "GET",
       headers: {

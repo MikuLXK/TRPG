@@ -21,19 +21,19 @@ type PromptDefaults = Record<AIFunctionType, { system: string; user: string; mod
 const AI_KEYS: AIFunctionType[] = ['actionCollector', 'mainStory', 'stateProcessor'];
 
 const PROVIDER_OPTIONS: Array<{ value: AIProviderType; label: string; endpoint: string }> = [
+  { value: 'openaiCompatible', label: 'OpenAI自定义', endpoint: '' },
   { value: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1' },
-  { value: 'gemini', label: 'Gemini(OpenAI兼容)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  { value: 'gemini', label: 'Gemini(原生)', endpoint: 'https://generativelanguage.googleapis.com/v1beta' },
   { value: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1' },
   { value: 'claude', label: 'Claude', endpoint: 'https://api.anthropic.com/v1' },
-  { value: 'openaiCompatible', label: 'OpenAI自定义', endpoint: 'https://api.openai.com/v1' },
 ];
 
 const providerEndpointMap: Record<AIProviderType, string> = {
   openai: 'https://api.openai.com/v1',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta',
   deepseek: 'https://api.deepseek.com/v1',
   claude: 'https://api.anthropic.com/v1',
-  openaiCompatible: 'https://api.openai.com/v1',
+  openaiCompatible: '',
 };
 
 const deepCloneSettings = (settings: GameSettings): GameSettings =>
@@ -80,7 +80,7 @@ const mergeSettings = (base: GameSettings, saved: Partial<GameSettings>): GameSe
   return merged;
 };
 
-const getDefaultEndpointByProvider = (provider: AIProviderType) => providerEndpointMap[provider] || providerEndpointMap.openai;
+const getDefaultEndpointByProvider = (provider: AIProviderType) => providerEndpointMap[provider] ?? '';
 
 export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', onExitToHome, roomId }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
@@ -490,7 +490,7 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
               value={settings.ai.defaultProvider}
               onChange={(e) => {
                 const provider = e.target.value as AIProviderType;
-                const defaultEndpoint = provider === 'openaiCompatible' ? settings.ai.defaultEndpoint : getDefaultEndpointByProvider(provider);
+                const defaultEndpoint = provider === 'openaiCompatible' ? '' : getDefaultEndpointByProvider(provider);
                 onChange((prev) => ({
                   ...prev,
                   ai: {
@@ -515,7 +515,7 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
                 value={settings.ai.defaultEndpoint}
                 onChange={(e) => onChange((prev) => ({ ...prev, ai: { ...prev.ai, defaultEndpoint: e.target.value } }))}
                 className="w-full bg-zinc-950 border border-zinc-700 rounded-lg py-2 pl-9 pr-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
-                placeholder="https://api.openai.com/v1"
+                placeholder={settings.ai.defaultProvider === 'openaiCompatible' ? '请填写自定义服务地址' : 'https://api.openai.com/v1'}
               />
             </div>
           </SettingItem>
@@ -562,7 +562,7 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
                           endpoint:
                             provider && provider !== 'openaiCompatible'
                               ? getDefaultEndpointByProvider(provider)
-                              : prev.ai[activeAI].connection.endpoint,
+                              : '',
                         },
                       },
                     },
@@ -580,36 +580,58 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
             <div className="flex items-end gap-2">
               <div className="flex-1">
                 <SettingItem label="模型选择 (Model)">
-                  <div className="relative">
-                    <Box size={14} className="absolute left-3 top-3 text-zinc-500" />
-                    <input
-                      type="text"
-                      list={`models-${activeAI}`}
-                      value={getAIConnection(activeAI).model}
-                      onChange={(e) => {
-                        const model = e.target.value;
-                        onChange((prev) => ({
-                          ...prev,
-                          ai: {
-                            ...prev.ai,
-                            [activeAI]: {
-                              ...prev.ai[activeAI],
-                              connection: {
-                                ...prev.ai[activeAI].connection,
-                                model,
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Box size={14} className="absolute left-3 top-3 text-zinc-500" />
+                      <input
+                        type="text"
+                        value={getAIConnection(activeAI).model}
+                        onChange={(e) => {
+                          const model = e.target.value;
+                          onChange((prev) => ({
+                            ...prev,
+                            ai: {
+                              ...prev.ai,
+                              [activeAI]: {
+                                ...prev.ai[activeAI],
+                                connection: {
+                                  ...prev.ai[activeAI].connection,
+                                  model,
+                                },
                               },
                             },
-                          },
-                        }));
-                      }}
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded-lg py-2 pl-9 pr-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
-                      placeholder="gpt-4o"
-                    />
-                    <datalist id={`models-${activeAI}`}>
-                      {modelOptions[activeAI].map((m) => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
-                    </datalist>
+                          }));
+                        }}
+                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg py-2 pl-9 pr-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
+                        placeholder="gpt-4o"
+                      />
+                    </div>
+                    {modelOptions[activeAI].length > 0 && (
+                      <select
+                        value={getAIConnection(activeAI).model}
+                        onChange={(e) => {
+                          const model = e.target.value;
+                          onChange((prev) => ({
+                            ...prev,
+                            ai: {
+                              ...prev.ai,
+                              [activeAI]: {
+                                ...prev.ai[activeAI],
+                                connection: {
+                                  ...prev.ai[activeAI].connection,
+                                  model,
+                                },
+                              },
+                            },
+                          }));
+                        }}
+                        className="w-full bg-zinc-950 border border-amber-500/40 rounded-lg py-2 px-2 text-zinc-200 focus:border-amber-500 outline-none text-xs"
+                      >
+                        {modelOptions[activeAI].map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 </SettingItem>
               </div>
@@ -648,7 +670,7 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
                     }));
                   }}
                   className="w-full bg-zinc-950 border border-zinc-700 rounded-lg py-2 pl-9 pr-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs placeholder:text-zinc-700"
-                  placeholder={getResolvedEndpoint(activeAI)}
+                  placeholder={getResolvedProvider(activeAI) === 'openaiCompatible' ? '请填写自定义服务地址' : getResolvedEndpoint(activeAI)}
                 />
               </div>
             </SettingItem>

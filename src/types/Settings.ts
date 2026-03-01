@@ -56,8 +56,8 @@ export const defaultSettings: GameSettings = {
     uiGlow: true,
   },
   ai: {
-    defaultProvider: 'openai',
-    defaultEndpoint: 'https://api.openai.com/v1',
+    defaultProvider: 'openaiCompatible',
+    defaultEndpoint: '',
     defaultApiKey: '',
     actionCollector: {
       connection: {

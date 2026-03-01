@@ -29,12 +29,12 @@ class SocketService {
     this.socket?.emit("create_room", data);
   }
 
-  joinRoom(roomId: string, playerName: string) {
-    this.socket?.emit("join_room", { roomId, playerName });
+  joinRoom(roomId: string, playerName: string, accountUsername?: string) {
+    this.socket?.emit("join_room", { roomId, playerName, accountUsername });
   }
 
-  getRooms() {
-    this.socket?.emit("get_rooms");
+  getRooms(data?: { accountUsername?: string; playerName?: string }) {
+    this.socket?.emit("get_rooms", data);
   }
 
   startGame(roomId: string) {

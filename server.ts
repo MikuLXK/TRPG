@@ -61,11 +61,14 @@ interface PlayerAISettings {
 interface Player {
   id: string;
   name: string;
+  accountUsername?: string;
   isReady: boolean;
   action: string;
   location: string;
   avatar?: string;
   role?: string;
+  isOnline: boolean;
+  lastSeenAt: number | null;
   apiFunctions: Record<AIFunctionType, boolean>;
   aiSettings: PlayerAISettings;
   selectedRoleTemplateId: string | null;
@@ -81,6 +84,7 @@ interface Room {
   intro?: string;
   players: Player[];
   status: RoomStatus;
+  hasStarted: boolean;
   currentRound: number;
   logs: any[];
   maxPlayers: number;
@@ -474,7 +478,7 @@ const callChatCompletion = async (args: {
 };
 
 const getFunctionProviders = (room: Room, functionType: AIFunctionType) => {
-  return room.players.filter((player) => player.apiFunctions[functionType]);
+  return getActivePlayers(room).filter((player) => player.apiFunctions[functionType]);
 };
 
 const pickProviderByRoundRobin = (room: Room, functionType: AIFunctionType) => {
@@ -506,7 +510,7 @@ const runActionCollector = async (room: Room) => {
   const modelTemplate = await readPromptFile("actionCollector", "model");
   const systemPrompt = await getPromptSystemOverride(providerPlayer, "actionCollector");
 
-  const actions = room.players.map((p) => ({
+  const actions = getActivePlayers(room).map((p) => ({
     playerId: p.id,
     playerName: p.name,
     action: p.action
@@ -595,6 +599,8 @@ const runStateProcessor = async (room: Room, storyText: string) => {
   return safeJsonParse<{ changes?: any[] }>(output) ?? { changes: [] };
 };
 
+const getActivePlayers = (room: Room) => room.players.filter((p) => p.isOnline !== false);
+
 const removePlayerFromRoom = (socketId: string) => {
   const roomId = socketRoomIndex[socketId];
   if (!roomId) return;
@@ -603,13 +609,23 @@ const removePlayerFromRoom = (socketId: string) => {
   delete socketRoomIndex[socketId];
   if (!room) return;
 
-  room.players = room.players.filter((p) => p.id !== socketId);
+  const targetPlayer = room.players.find((p) => p.id === socketId);
+  if (!targetPlayer) return;
 
-  if (room.players.length === 0) {
+  if (room.hasStarted) {
+    targetPlayer.isOnline = false;
+    targetPlayer.lastSeenAt = Date.now();
+    targetPlayer.isReady = false;
+    targetPlayer.action = "";
+  } else {
+    room.players = room.players.filter((p) => p.id !== socketId);
+  }
+
+  if (room.players.length === 0 || getActivePlayers(room).length === 0) {
     room.emptySince = Date.now();
   } else {
     room.emptySince = null;
-    if (room.hostId === socketId) {
+    if (!room.hasStarted && room.hostId === socketId) {
       room.hostId = room.players[0].id;
     }
   }
@@ -623,7 +639,7 @@ const sweepEmptyRooms = () => {
   let changed = false;
 
   Object.entries(rooms).forEach(([roomId, room]) => {
-    if (room.players.length > 0) {
+    if (getActivePlayers(room).length > 0) {
       room.emptySince = null;
       return;
     }
@@ -648,17 +664,32 @@ setInterval(sweepEmptyRooms, ROOM_SWEEP_INTERVAL_MS);
 io.on("connection", (socket) => {
   console.log(`Client connected: ${socket.id}`);
 
-  socket.on("get_rooms", () => {
-    const roomList = Object.values(rooms).map((r) => ({
-      id: r.id,
-      name: r.name,
-      script: r.script.title,
-      players: r.players.length,
-      maxPlayers: r.maxPlayers,
-      locked: !!r.password,
-      status: r.status,
-      inGame: r.status !== "waiting"
-    }));
+  socket.on("get_rooms", (data?: { accountUsername?: string; playerName?: string }) => {
+    const accountUsername = typeof data?.accountUsername === "string" ? data.accountUsername.trim() : "";
+    const playerName = typeof data?.playerName === "string" ? data.playerName.trim() : "";
+
+    const roomList = Object.values(rooms).map((r) => {
+      const activePlayers = getActivePlayers(r);
+      const reconnectCandidate = accountUsername
+        ? r.players.find((p) => p.accountUsername === accountUsername)
+        : playerName
+          ? r.players.find((p) => p.name === playerName)
+          : undefined;
+
+      const reconnectable = Boolean(r.hasStarted && reconnectCandidate && !reconnectCandidate.isOnline);
+
+      return {
+        id: r.id,
+        name: r.name,
+        script: r.script.title,
+        players: activePlayers.length,
+        maxPlayers: r.maxPlayers,
+        locked: !!r.password,
+        status: r.status,
+        inGame: r.hasStarted,
+        reconnectable
+      };
+    });
     socket.emit("rooms_list", roomList);
   });
 
@@ -686,11 +717,14 @@ io.on("connection", (socket) => {
       players: [{
         id: socket.id,
         name: data.playerName || "房主",
+        accountUsername: data.accountUsername,
         isReady: false,
         action: "",
         location: "初始地点",
         role: "未分配",
         avatar: "bg-amber-500",
+        isOnline: true,
+        lastSeenAt: null,
         apiFunctions: {
           actionCollector: false,
           mainStory: false,
@@ -701,6 +735,7 @@ io.on("connection", (socket) => {
         characterProfile: createDefaultCharacterProfile(script.roleTemplates[0])
       }],
       status: "waiting",
+      hasStarted: false,
       currentRound: 1,
       logs: [],
       maxPlayers: 4,
@@ -723,21 +758,91 @@ io.on("connection", (socket) => {
     console.log(`Room created: ${roomId} (${data.roomName}) by ${data.playerName}`);
   });
 
-  socket.on("join_room", ({ roomId, playerName }: { roomId: string; playerName: string }) => {
+  socket.on("join_room", ({ roomId, playerName, accountUsername }: { roomId: string; playerName: string; accountUsername?: string }) => {
     const room = rooms[roomId];
     if (!room) {
       socket.emit("error", "房间不存在");
       return;
     }
 
-    if (room.status !== "waiting") {
-      socket.emit("error", "游戏已开始，无法加入");
+    const activePlayers = getActivePlayers(room);
+    const identityKey = typeof accountUsername === "string" && accountUsername.trim()
+      ? { type: "account" as const, value: accountUsername.trim() }
+      : { type: "name" as const, value: playerName };
+
+    const existingPlayer = room.players.find((p) => (
+      identityKey.type === "account"
+        ? p.accountUsername === identityKey.value
+        : p.name === identityKey.value
+    ));
+
+    if (room.hasStarted) {
+      if (!existingPlayer) {
+        socket.emit("error", "游戏已开始，仅支持断线重连");
+        return;
+      }
+
+      if (existingPlayer.isOnline) {
+        socket.emit("error", "该玩家已在线");
+        return;
+      }
+
+      const oldId = existingPlayer.id;
+      existingPlayer.id = socket.id;
+      existingPlayer.name = playerName;
+      existingPlayer.accountUsername = accountUsername ?? existingPlayer.accountUsername;
+      existingPlayer.isOnline = true;
+      existingPlayer.lastSeenAt = null;
+
+      if (oldId && oldId !== socket.id) {
+        delete socketRoomIndex[oldId];
+      }
+
+      socketRoomIndex[socket.id] = roomId;
+      room.emptySince = null;
+      socket.join(roomId);
+      io.to(roomId).emit("room_updated", room);
+      io.emit("rooms_list_updated");
+      console.log(`${playerName} reconnected to room ${roomId}`);
       return;
     }
 
-    const existingPlayer = room.players.find((p) => p.name === playerName);
+    if (room.status !== "waiting") {
+      socket.emit("error", "房间暂不可加入");
+      return;
+    }
+
+    if (activePlayers.length >= room.maxPlayers) {
+      socket.emit("error", "房间人数已满");
+      return;
+    }
+
     if (existingPlayer) {
-      socket.emit("error", "玩家名已存在");
+      if (existingPlayer.isOnline) {
+        socket.emit("error", "玩家名已存在");
+        return;
+      }
+
+      const oldId = existingPlayer.id;
+      existingPlayer.id = socket.id;
+      existingPlayer.name = playerName;
+      existingPlayer.accountUsername = accountUsername ?? existingPlayer.accountUsername;
+      existingPlayer.isOnline = true;
+      existingPlayer.lastSeenAt = null;
+      existingPlayer.isReady = false;
+      existingPlayer.action = "";
+
+      if (oldId && oldId !== socket.id) {
+        delete socketRoomIndex[oldId];
+      }
+
+      socketRoomIndex[socket.id] = roomId;
+      room.emptySince = null;
+      socket.join(roomId);
+
+      io.to(roomId).emit("room_updated", room);
+      io.emit("rooms_list_updated");
+      console.log(`${playerName} rejoined room ${roomId}`);
       return;
     }
 
@@ -750,9 +855,12 @@ io.on("connection", (socket) => {
     const newPlayer: Player = {
       id: socket.id,
       name: playerName,
+      accountUsername,
       isReady: false,
       action: "",
       location: "初始地点",
+      isOnline: true,
+      lastSeenAt: null,
       apiFunctions: {
         actionCollector: false,
         mainStory: false,
@@ -916,6 +1024,7 @@ io.on("connection", (socket) => {
     }
 
     room.status = "playing";
+    room.hasStarted = true;
     io.to(roomId).emit("room_updated", room);
     io.emit("rooms_list_updated");
     console.log(`Game started in room ${roomId}`);
@@ -952,11 +1061,12 @@ io.on("connection", (socket) => {
     player.action = action;
     player.isReady = true;
 
-    const readyCount = room.players.filter((p) => p.isReady).length;
-    io.to(roomId).emit("turn_progress", { readyCount, total: room.players.length });
+    const activePlayers = getActivePlayers(room);
+    const readyCount = activePlayers.filter((p) => p.isReady).length;
+    io.to(roomId).emit("turn_progress", { readyCount, total: activePlayers.length });
     io.to(roomId).emit("room_updated", room);
 
-    const allReady = room.players.length > 0 && room.players.every((p) => p.isReady);
+    const allReady = activePlayers.length > 0 && activePlayers.every((p) => p.isReady);
 
     if (allReady) {
       room.status = "processing";
@@ -1016,7 +1126,7 @@ async function processTurn(roomId: string) {
       p.action = "";
     });
 
-    io.to(roomId).emit("turn_progress", { readyCount: 0, total: room.players.length });
+    io.to(roomId).emit("turn_progress", { readyCount: 0, total: getActivePlayers(room).length });
     io.to(roomId).emit("round_complete", {
       room,
       story: story || "本回合没有生成有效剧情。"
@@ -1030,7 +1140,7 @@ async function processTurn(roomId: string) {
     room.players.forEach((p) => {
       p.isReady = false;
     });
-    io.to(roomId).emit("turn_progress", { readyCount: 0, total: room.players.length });
+    io.to(roomId).emit("turn_progress", { readyCount: 0, total: getActivePlayers(room).length });
     io.to(roomId).emit("room_updated", room);
     io.emit("rooms_list_updated");
   }

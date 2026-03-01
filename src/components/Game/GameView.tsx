@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Header from '../Layout/Header';
 import Footer from '../Layout/Footer';
 import CharacterPanel from '../Panels/CharacterPanel';
 import GameLogPanel from '../Panels/GameLogPanel';
 import RightPanel from '../Panels/RightPanel';
 import SettingsModal from '../Settings/SettingsModal';
-import { 初始游戏状态, 游戏状态, 游戏日志 } from '../../types/GameData';
+import { 初始游戏状态, 游戏状态, 游戏日志, 角色信息 } from '../../types/GameData';
+import type { ScriptRoleTemplate, CharacterAttributeBlock } from '../../types/Script';
 import { socketService } from '../../services/socketService';
 
 interface GameViewProps {
@@ -23,6 +24,66 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
   const [totalPlayers, setTotalPlayers] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamPreview, setStreamPreview] = useState('');
+
+  const roomPlayers = roomState?.players || [];
+  const roleTemplates: ScriptRoleTemplate[] = roomState?.script?.roleTemplates || [];
+  const selfId = socketService.socket?.id;
+
+  const currentPlayerInfo = useMemo<角色信息>(() => {
+    const selfPlayer = roomPlayers.find((p: any) => p.id === selfId);
+    if (!selfPlayer) {
+      return {
+        姓名: '',
+        职业: '',
+        等级: 1,
+        生命值: 0,
+        最大生命值: 1,
+        法力值: 0,
+        最大法力值: 1,
+        属性: {
+          力量: 0,
+          敏捷: 0,
+          体质: 0,
+          智力: 0,
+          感知: 0,
+          魅力: 0,
+        },
+        状态: [],
+        背景故事: '',
+      };
+    }
+
+    const profile = selfPlayer.characterProfile;
+    const selectedTemplate = roleTemplates.find((t) => t.id === selfPlayer.selectedRoleTemplateId) || roleTemplates[0];
+    const selectedClass = selectedTemplate?.classOptions?.find((o) => o.id === profile?.selectedClassId);
+    const selectedRace = selectedTemplate?.raceOptions?.find((o) => o.id === profile?.selectedRaceId);
+    const roleName = [selectedClass?.name, selectedRace?.name].filter(Boolean).join(' / ');
+
+    const attrs: CharacterAttributeBlock = profile?.calculatedAttributes || {
+      力量: 0,
+      敏捷: 0,
+      体质: 0,
+      智力: 0,
+      感知: 0,
+      魅力: 0,
+    };
+
+    const maxHP = Math.max(1, 60 + attrs.体质 * 4);
+    const maxMP = Math.max(0, 20 + attrs.智力 * 4);
+
+    return {
+      姓名: profile?.characterName?.trim() || selfPlayer.name || '未命名',
+      职业: roleName || '未选择职业',
+      等级: 1,
+      生命值: maxHP,
+      最大生命值: maxHP,
+      法力值: maxMP,
+      最大法力值: maxMP,
+      属性: attrs,
+      状态: ['正常'],
+      背景故事: selectedTemplate?.description || roomState?.script?.description || '',
+    };
+  }, [roomPlayers, roleTemplates, selfId, roomState?.script?.description]);
 
   useEffect(() => {
     const socket = socketService.socket;
@@ -157,7 +218,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       <main className="flex-1 flex items-center justify-center overflow-hidden relative p-4">
         <div className="w-full h-full flex border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl bg-black">
           <div className="w-[280px] flex-shrink-0 z-20 bg-black relative">
-            <CharacterPanel 角色={游戏数据.玩家} />
+            <CharacterPanel 角色={currentPlayerInfo} />
           </div>
 
           <div className="flex-1 flex flex-col min-w-0 z-10 relative bg-zinc-900/50 p-3">

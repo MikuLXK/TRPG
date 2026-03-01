@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { ChevronLeft, RefreshCw, Users, Lock, Check, Info } from 'lucide-react';
 import { socketService } from '../../../services/socketService';
@@ -8,26 +8,42 @@ interface JoinRoomProps {
   setPlayerName: (name: string) => void;
   onBack: () => void;
   onJoinRoom: (roomId: string) => void;
+  accountUsername: string;
 }
 
-export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom }: JoinRoomProps) {
+interface RoomListItem {
+  id: string;
+  name: string;
+  script: string;
+  players: number;
+  maxPlayers: number;
+  locked: boolean;
+  status: string;
+  inGame: boolean;
+  reconnectable?: boolean;
+}
+
+export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom, accountUsername }: JoinRoomProps) {
   const [joinRoomId, setJoinRoomId] = useState('');
-  const [roomList, setRoomList] = useState<any[]>([]);
+  const [roomList, setRoomList] = useState<RoomListItem[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const refreshRooms = () => {
     setIsRefreshing(true);
-    socketService.getRooms();
+    socketService.getRooms({
+      accountUsername,
+      playerName: playerName.trim(),
+    });
   };
 
   useEffect(() => {
-    const onRoomsList = (rooms: any[]) => {
+    const onRoomsList = (rooms: RoomListItem[]) => {
       setRoomList(rooms);
       setIsRefreshing(false);
     };
 
     const onRoomsListUpdated = () => {
-      socketService.getRooms();
+      refreshRooms();
     };
 
     socketService.socket?.on('rooms_list', onRoomsList);
@@ -39,13 +55,18 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
       socketService.socket?.off('rooms_list', onRoomsList);
       socketService.socket?.off('rooms_list_updated', onRoomsListUpdated);
     };
-  }, []);
+  }, [accountUsername, playerName]);
 
   const handleJoin = () => {
     if (joinRoomId) {
       onJoinRoom(joinRoomId);
     }
   };
+
+  const reconnectableRooms = useMemo(
+    () => roomList.filter((room) => room.reconnectable),
+    [roomList],
+  );
 
   return (
     <motion.div
@@ -94,6 +115,26 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
           </div>
 
           <div className="space-y-4">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+              <div className="text-xs font-bold text-amber-300">可返回房间</div>
+              {reconnectableRooms.length > 0 ? (
+                <div className="mt-2 space-y-2">
+                  {reconnectableRooms.map((room) => (
+                    <button
+                      key={`reconnect-${room.id}`}
+                      type="button"
+                      onClick={() => setJoinRoomId(room.id)}
+                      className="w-full text-left px-3 py-2 rounded-lg border border-amber-500/30 bg-zinc-900/70 hover:bg-zinc-900 text-zinc-200"
+                    >
+                      <div className="text-sm font-semibold">{room.name}</div>
+                      <div className="text-[11px] text-amber-300">房间号：{room.id}（你可重连）</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-1 text-xs text-zinc-400">当前没有可返回的房间</div>
+              )}
+            </div>
             <div className="flex justify-between items-center">
               <h3 className="text-sm font-bold text-zinc-400 flex items-center gap-2">
                 <Users size={16} /> 公开房间列表
@@ -122,7 +163,11 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
                       <div className="text-xs text-zinc-500 mt-1">{room.script}</div>
                       <div className="text-[11px] mt-1">
                         {room.inGame ? (
-                          <span className="text-red-400">状态：游戏中（不可加入）</span>
+                          room.reconnectable ? (
+                            <span className="text-amber-400">状态：游戏中（可返回）</span>
+                          ) : (
+                            <span className="text-red-400">状态：游戏中（不可加入）</span>
+                          )
                         ) : (
                           <span className="text-emerald-400">状态：等待中</span>
                         )}

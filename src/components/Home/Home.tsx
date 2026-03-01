@@ -142,7 +142,7 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
       showToast("请输入或选择一个房间", 'error');
       return;
     }
-    socketService.joinRoom(roomId, playerName);
+    socketService.joinRoom(roomId, playerName, accountUsername);
   };
 
   const renderView = () => {
@@ -168,6 +168,7 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
             setPlayerName={setPlayerName}
             onBack={() => setView('main')}
             onJoinRoom={handleJoinRoom}
+            accountUsername={accountUsername}
           />
         );
       case 'main':

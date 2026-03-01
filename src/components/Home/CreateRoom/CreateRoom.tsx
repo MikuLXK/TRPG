@@ -8,7 +8,7 @@ interface CreateRoomProps {
   playerName: string;
   setPlayerName: (name: string) => void;
   onBack: () => void;
-  onCreateRoom: (params: { roomName: string, scriptId: string, password?: string, intro?: string }) => void;
+  onCreateRoom: (params: { roomName: string, scriptId: string, password?: string, intro?: string, scriptPayload?: any }) => void;
   initialDraft?: { roomName?: string; scriptId?: string; password?: string; intro?: string } | null;
   onDraftChange?: (draft: { roomName: string; scriptId: string; password?: string; intro?: string }) => void;
 }
@@ -42,6 +42,7 @@ export default function CreateRoom({ playerName, setPlayerName, onBack, onCreate
       scriptId: selectedScriptId,
       password: roomPassword,
       intro: roomIntro,
+      scriptPayload: selectedScript,
     });
   };
 

@@ -25,7 +25,15 @@ class SocketService {
     this.socket?.disconnect();
   }
 
-  createRoom(data: { roomName: string; scriptId: string; password?: string; intro?: string; playerName: string; accountUsername?: string }) {
+  createRoom(data: {
+    roomName: string;
+    scriptId: string;
+    password?: string;
+    intro?: string;
+    playerName: string;
+    accountUsername?: string;
+    scriptPayload?: any;
+  }) {
     this.socket?.emit("create_room", data);
   }
 
@@ -75,6 +83,21 @@ class SocketService {
 
   updateCharacterProfile(roomId: string, profile: Partial<PlayerCharacterProfile>) {
     this.socket?.emit("update_character_profile", { roomId, profile });
+  }
+
+  requestSharedAsset(roomId: string, assetType: "script" | "save") {
+    this.socket?.emit("request_shared_asset", { roomId, assetType });
+  }
+
+  publishSharedAsset(args: {
+    roomId: string;
+    assetType: "script" | "save";
+    id: string;
+    name: string;
+    updatedAt: number;
+    payload: any;
+  }) {
+    this.socket?.emit("publish_shared_asset", args);
   }
 
   async fetchPromptDefaults() {

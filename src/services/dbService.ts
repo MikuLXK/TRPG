@@ -73,6 +73,21 @@ class DBService {
     return save?.data;
   }
 
+  async getSaveRecord(saveId: string) {
+    const db = await this.dbPromise;
+    return db.get('saves', saveId);
+  }
+
+  async upsertSaveRecord(save: {
+    id: string;
+    name: string;
+    timestamp: number;
+    data: 游戏状态;
+  }) {
+    const db = await this.dbPromise;
+    await db.put('saves', save);
+  }
+
   async getAllSaves() {
     const db = await this.dbPromise;
     return db.getAll('saves');

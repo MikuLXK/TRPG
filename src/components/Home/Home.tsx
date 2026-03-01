@@ -7,6 +7,8 @@ import Toast, { ToastType } from '../UI/Toast';
 import MainMenu from './MainMenu/MainMenu';
 import CreateRoom from './CreateRoom/CreateRoom';
 import JoinRoom from './JoinRoom/JoinRoom';
+import type { ScriptDefinition } from '../../types/Script';
+import type { 游戏状态 } from '../../types/GameData';
 
 interface HomeProps {
   onJoinGame: (roomState: any) => void;
@@ -24,6 +26,55 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
 
   const showToast = (message: string, type: ToastType = 'info') => {
     setToast({ message, type });
+  };
+
+  const computeHash = (value: unknown) => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    }
+    return String(Math.abs(hash));
+  };
+
+  const ensureSharedScriptInstalled = async (roomState: any) => {
+    const shared = roomState?.sharedAssets?.script;
+    if (!shared?.payload) return;
+
+    const localScript = await dbService.getScript(shared.id);
+    const localHash = localScript ? computeHash(localScript) : '';
+    if (localHash === shared.hash) return;
+
+    const confirmed = window.confirm(`房间正在使用房主共享剧本《${shared.name}》。\n是否下载到本地并使用？`);
+    if (!confirmed) return;
+
+    await dbService.upsertScript(shared.payload as ScriptDefinition);
+    showToast(`已下载剧本：${shared.name}`, 'success');
+  };
+
+  const ensureSharedSaveInstalled = async (roomState: any) => {
+    const shared = roomState?.sharedAssets?.save;
+    if (!shared?.payload) return;
+
+    const installMarker = `${accountUsername}::shared-save::${shared.id}::${shared.hash}`;
+    if (localStorage.getItem(installMarker) === '1') return;
+
+    const localSave = await dbService.getSaveRecord(shared.id);
+    const localHash = localSave ? computeHash(localSave.data) : '';
+    if (localHash === shared.hash) {
+      localStorage.setItem(installMarker, '1');
+      return;
+    }
+
+    const confirmed = window.confirm(`房间中有共享继续游戏存档《${shared.name}》。\n是否下载到本地？`);
+    if (!confirmed) return;
+
+    const savePayload = shared.payload as { id: string; name: string; timestamp: number; data: 游戏状态 };
+    if (savePayload?.id && savePayload?.data) {
+      await dbService.upsertSaveRecord(savePayload);
+      localStorage.setItem(installMarker, '1');
+      showToast(`已下载存档：${shared.name}`, 'success');
+    }
   };
 
   useEffect(() => {
@@ -48,9 +99,11 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
         onJoinGame(roomState);
       };
 
-      const onRoomJoined = (roomState: any) => {
+      const onRoomJoined = async (roomState: any) => {
         // This event is fired when a player (including the current user) successfully joins a room.
         if (roomState.players.some((p: any) => p.id === socket.id)) {
+            await ensureSharedScriptInstalled(roomState);
+            await ensureSharedSaveInstalled(roomState);
             console.log("Successfully joined room, transitioning to game:", roomState.id);
             onJoinGame(roomState);
         }
@@ -121,7 +174,7 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
     return () => window.clearTimeout(timer);
   }, [accountUsername, playerName]);
 
-  const handleCreateRoom = (params: { roomName: string, scriptId: string, password?: string, intro?: string }) => {
+  const handleCreateRoom = (params: { roomName: string, scriptId: string, password?: string, intro?: string, scriptPayload?: any }) => {
     if (!playerName.trim()) {
       showToast("请输入玩家昵称", 'error');
       return;
@@ -130,6 +183,7 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
       ...params,
       playerName,
       accountUsername,
+      scriptPayload: params.scriptPayload,
     });
   };
 

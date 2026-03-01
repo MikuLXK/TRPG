@@ -32,6 +32,7 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
   const players = roomState.players || [];
   const selfId = socketService.socket?.id;
   const script = roomState.script;
+  const sharedAssets = roomState.sharedAssets || {};
   const roleTemplates = script?.roleTemplates || [];
   const savedCharacters = roomState.savedCharacters || [];
   const gameSetupMode: 'new_game' | 'load_save' = roomState.gameSetupMode || 'new_game';
@@ -276,18 +277,38 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
         <header className="flex justify-between items-start mb-4 flex-shrink-0">
           <div>
             <h1 className="text-3xl font-bold text-amber-500 mb-2 font-serif tracking-wider">等待大厅</h1>
-            <div className="flex flex-wrap items-center gap-3 text-zinc-400 text-sm">
-              <span>房间号:</span>
-              <div className="flex items-center gap-2 bg-zinc-950 px-3 py-1 rounded border border-zinc-800 font-mono text-amber-200">
-                {roomState.id}
-                <button onClick={copyRoomId} className="hover:text-white transition-colors">
-                  {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                </button>
-              </div>
-              <span className="text-zinc-600">|</span>
-              <span className="text-zinc-300">剧本：{script?.title || roomState.scriptId}</span>
-            </div>
-          </div>
+             <div className="flex flex-wrap items-center gap-3 text-zinc-400 text-sm">
+               <span>房间号:</span>
+               <div className="flex items-center gap-2 bg-zinc-950 px-3 py-1 rounded border border-zinc-800 font-mono text-amber-200">
+                 {roomState.id}
+                 <button onClick={copyRoomId} className="hover:text-white transition-colors">
+                   {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                 </button>
+               </div>
+               <span className="text-zinc-600">|</span>
+               <span className="text-zinc-300">剧本：{script?.title || roomState.scriptId}</span>
+             </div>
+             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+               {sharedAssets.script && (
+                 <button
+                   type="button"
+                   onClick={() => socketService.requestSharedAsset(roomState.id, 'script')}
+                   className="px-2 py-1 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                 >
+                   下载房间剧本
+                 </button>
+               )}
+               {sharedAssets.save && (
+                 <button
+                   type="button"
+                   onClick={() => socketService.requestSharedAsset(roomState.id, 'save')}
+                   className="px-2 py-1 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300"
+                 >
+                   下载继续游戏存档
+                 </button>
+               )}
+             </div>
+</div>
           <button onClick={onLeaveRoom} className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-red-400 transition-colors">
             <LogOut size={20} />
           </button>

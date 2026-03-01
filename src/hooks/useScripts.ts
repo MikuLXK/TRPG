@@ -15,19 +15,16 @@ export function useScripts() {
     const loadScripts = async () => {
       try {
         const storedScripts = await dbService.getAllScripts();
-        const libraryIds = new Set(SCRIPT_LIBRARY.map((script) => script.id));
-
-        await Promise.all(
-          storedScripts
-            .filter((script) => !libraryIds.has(script.id))
-            .map((script) => dbService.deleteScript(script.id))
-        );
 
         await Promise.all(SCRIPT_LIBRARY.map((script) => dbService.upsertScript(script)));
 
         const finalScripts = await dbService.getAllScripts();
+        const mergedById = new Map<string, ScriptDefinition>();
+        [...storedScripts, ...finalScripts].forEach((script) => {
+          mergedById.set(script.id, script);
+        });
         if (!cancelled) {
-          setScripts(finalScripts);
+          setScripts(Array.from(mergedById.values()));
         }
       } catch {
         if (!cancelled) {

@@ -85,6 +85,16 @@ interface Player {
   characterProfile: PlayerCharacterProfile;
 }
 
+interface SharedAssetEnvelope<T = unknown> {
+  assetType: "script" | "save";
+  id: string;
+  name: string;
+  hash: string;
+  updatedAt: number;
+  ownerId: string;
+  payload: T;
+}
+
 interface Room {
   id: string;
   hostId: string;
@@ -103,6 +113,10 @@ interface Room {
   functionRotationIndex: Record<AIFunctionType, number>;
   emptySince: number | null;
   script: ScriptDefinition;
+  sharedAssets: {
+    script?: SharedAssetEnvelope<ScriptDefinition>;
+    save?: SharedAssetEnvelope<any>;
+  };
 }
 
 const FUNCTION_TYPES: AIFunctionType[] = ["actionCollector", "mainStory", "stateProcessor"];
@@ -137,6 +151,15 @@ const rooms: Record<string, Room> = {};
 const socketRoomIndex: Record<string, string> = {};
 
 const generateRoomId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+
+const computeHash = (value: unknown) => {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  }
+  return String(Math.abs(hash));
+};
 
 const cloneDefaultAISettings = (): PlayerAISettings => {
   return JSON.parse(JSON.stringify(defaultAISettings)) as PlayerAISettings;
@@ -800,8 +823,19 @@ io.on("connection", (socket) => {
     socket.emit("rooms_list", roomList);
   });
 
-  socket.on("create_room", (data: { roomName: string; scriptId: string; password?: string; intro?: string; playerName: string; accountUsername?: string }) => {
-    const script = getScriptById(data.scriptId);
+  socket.on("create_room", (data: {
+    roomName: string;
+    scriptId: string;
+    password?: string;
+    intro?: string;
+    playerName: string;
+    accountUsername?: string;
+    scriptPayload?: ScriptDefinition;
+  }) => {
+    const scriptFromPayload = data.scriptPayload && data.scriptPayload.id === data.scriptId
+      ? data.scriptPayload
+      : undefined;
+    const script = scriptFromPayload || getScriptById(data.scriptId);
     if (!script) {
       socket.emit("error", "无效剧本");
       return;
@@ -856,7 +890,18 @@ io.on("connection", (socket) => {
         stateProcessor: 0
       },
       emptySince: null,
-      script
+      script,
+      sharedAssets: {
+        script: {
+          assetType: "script",
+          id: script.id,
+          name: script.title,
+          hash: computeHash(script),
+          updatedAt: Date.now(),
+          ownerId: socket.id,
+          payload: script
+        }
+      }
     };
 
     rooms[roomId] = newRoom;
@@ -876,11 +921,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (room.password && room.password !== (password ?? "")) {
-      socket.emit("error", "房间密码错误");
-      return;
-    }
-
     const activePlayers = getActivePlayers(room);
     const identityKey = typeof accountUsername === "string" && accountUsername.trim()
       ? { type: "account" as const, value: accountUsername.trim() }
@@ -891,6 +931,13 @@ io.on("connection", (socket) => {
         ? p.accountUsername === identityKey.value
         : p.name === identityKey.value
     ));
+
+    const isReconnectAttempt = Boolean(existingPlayer && !existingPlayer.isOnline);
+
+    if (!isReconnectAttempt && room.password && room.password !== (password ?? "")) {
+      socket.emit("error", "房间密码错误");
+      return;
+    }
 
     if (room.hasStarted) {
       if (!existingPlayer) {
@@ -1219,6 +1266,82 @@ io.on("connection", (socket) => {
 
     setPlayerCustomCharacterMode(room, player, enabled);
     io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("publish_shared_asset", ({
+    roomId,
+    assetType,
+    id,
+    name,
+    updatedAt,
+    payload
+  }: {
+    roomId: string;
+    assetType: "script" | "save";
+    id: string;
+    name: string;
+    updatedAt: number;
+    payload: any;
+  }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    if (!id || !name) {
+      socket.emit("error", "共享资源缺少必要信息");
+      return;
+    }
+
+    const envelope: SharedAssetEnvelope<any> = {
+      assetType,
+      id,
+      name,
+      hash: computeHash(payload),
+      updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+      ownerId: socket.id,
+      payload
+    };
+
+    room.sharedAssets[assetType] = envelope;
+
+    if (assetType === "script") {
+      const nextScript = payload as ScriptDefinition;
+      if (!nextScript || !Array.isArray(nextScript.roleTemplates) || !nextScript.roleTemplates.length) {
+        socket.emit("error", "共享剧本格式无效");
+        return;
+      }
+      room.script = nextScript;
+      room.scriptId = nextScript.id;
+      room.players.forEach((p) => {
+        if (!p.selectedRoleTemplateId || !nextScript.roleTemplates.some((r) => r.id === p.selectedRoleTemplateId)) {
+          p.selectedRoleTemplateId = nextScript.roleTemplates[0]?.id || null;
+          if (nextScript.roleTemplates[0]) {
+            p.characterProfile = createDefaultCharacterProfile(nextScript.roleTemplates[0]);
+            applyCharacterProfilePatch(room, p, {});
+          }
+        }
+      });
+    }
+
+    io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("request_shared_asset", ({ roomId, assetType }: { roomId: string; assetType: "script" | "save" }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    const asset = room.sharedAssets[assetType];
+    if (!asset) {
+      socket.emit("error", "该房间暂无可下载资源");
+      return;
+    }
+
+    socket.emit("shared_asset_payload", asset);
   });
 
   socket.on("start_game", ({ roomId }: { roomId: string }) => {

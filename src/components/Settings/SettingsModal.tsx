@@ -728,6 +728,7 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
 }
 
 function StorageSettings({ showToast, setConfirmDialog, accountUsername }: { showToast: (msg: string, type: ToastType) => void, setConfirmDialog: any, accountUsername?: string }) {
+  const [selectedSaveId, setSelectedSaveId] = useState('');
   const [usage, setUsage] = useState({ usage: 0, quota: 0 });
   const [saveCount, setSaveCount] = useState(0);
 
@@ -740,6 +741,9 @@ function StorageSettings({ showToast, setConfirmDialog, accountUsername }: { sho
     setUsage(info);
     const saves = accountUsername ? await dbService.getAllUserSaves(accountUsername) : await dbService.getAllSaves();
     setSaveCount(saves.length);
+    if (!selectedSaveId && saves.length > 0) {
+      setSelectedSaveId(saves[0].id);
+    }
   };
 
   const handleClearData = async () => {
@@ -786,12 +790,60 @@ function StorageSettings({ showToast, setConfirmDialog, accountUsername }: { sho
 
       <Section title="数据管理">
         <div className="grid grid-cols-1 gap-4">
-          <div className="flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
+          <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
             <div>
-              <div className="text-zinc-200 font-bold">游戏存档</div>
-              <div className="text-zinc-500 text-xs">包含所有角色状态和剧情进度</div>
+              <div className="text-zinc-200 font-bold">游戏存档共享到房间</div>
+              <div className="text-zinc-500 text-xs">选择一个本地存档并分享到当前房间，其他玩家可下载到各自本地</div>
             </div>
-            <button className="px-4 py-2 border border-zinc-700 hover:bg-zinc-800 text-zinc-300 rounded-lg text-sm transition-colors">导出</button>
+            <div className="flex gap-2">
+              <select
+                value={selectedSaveId}
+                onChange={(e) => setSelectedSaveId(e.target.value)}
+                className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+              >
+                <option value="">请选择存档</option>
+                <option value="__latest__">最新存档</option>
+              </select>
+              <button
+                type="button"
+                onClick={async () => {
+                  const roomId = localStorage.getItem('trpg_current_room_id') || '';
+                  if (!roomId) {
+                    showToast('当前不在房间中，无法共享存档', 'error');
+                    return;
+                  }
+
+                  const all = accountUsername ? await dbService.getAllUserSaves(accountUsername) : await dbService.getAllSaves();
+                  if (!all.length) {
+                    showToast('本地没有可共享存档', 'error');
+                    return;
+                  }
+
+                  const save = selectedSaveId && selectedSaveId !== '__latest__'
+                    ? all.find((s: any) => s.id === selectedSaveId)
+                    : all.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
+
+                  if (!save) {
+                    showToast('未找到所选存档', 'error');
+                    return;
+                  }
+
+                  socketService.publishSharedAsset({
+                    roomId,
+                    assetType: 'save',
+                    id: save.id,
+                    name: save.name,
+                    updatedAt: save.timestamp,
+                    payload: save,
+                  });
+
+                  showToast('存档已发布到房间，可供其他玩家下载', 'success');
+                }}
+                className="px-4 py-2 border border-zinc-700 hover:bg-zinc-800 text-zinc-300 rounded-lg text-sm transition-colors"
+              >
+                共享存档
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl">

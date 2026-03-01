@@ -1,0 +1,17 @@
+请只输出JSON，不要输出额外解释文本。JSON结构如下：
+{
+  "groups": [
+    {
+      "groupId": "g1",
+      "playerIds": ["p1", "p2"],
+      "reason": "简要说明分组依据"
+    }
+  ],
+  "rawActions": [
+    {
+      "playerId": "p1",
+      "playerName": "玩家A",
+      "action": "原始输入"
+    }
+  ]
+}

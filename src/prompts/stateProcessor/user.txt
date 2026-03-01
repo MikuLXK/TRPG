@@ -1,0 +1,7 @@
+以下是剧情文本：
+{{storyText}}
+
+以下是当前玩家状态（JSON）：
+{{currentStateJson}}
+
+请提取可确定的状态变化。

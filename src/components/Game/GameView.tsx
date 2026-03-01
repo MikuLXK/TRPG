@@ -11,9 +11,10 @@ import { socketService } from '../../services/socketService';
 interface GameViewProps {
   roomState: any;
   onExit: () => void;
+  roomId?: string;
 }
 
-export default function GameView({ roomState, onExit }: GameViewProps) {
+export default function GameView({ roomState, onExit, roomId }: GameViewProps) {
   const [游戏数据, set游戏数据] = useState<游戏状态>(初始游戏状态);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -33,7 +34,7 @@ export default function GameView({ roomState, onExit }: GameViewProps) {
         setIsReady(myPlayer.isReady);
       }
 
-      socket.on("round_complete", ({ room, story }: { room: any, story: string }) => {
+      socket.on("round_complete", ({ story }: { room: any, story: string }) => {
         // Add story log
         const newLog: 游戏日志 = {
           id: Date.now().toString(),
@@ -158,10 +159,11 @@ export default function GameView({ roomState, onExit }: GameViewProps) {
 
       <Footer />
       
-      <SettingsModal 
-        isOpen={isSettingsOpen} 
-        onClose={() => setIsSettingsOpen(false)} 
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
         onExitToHome={onExit}
+        roomId={roomId}
       />
     </div>
   );

@@ -59,9 +59,10 @@ export default function App() {
   }
 
   return (
-    <GameView 
-      roomState={roomState} 
-      onExit={handleLeaveRoom} 
+    <GameView
+      roomState={roomState}
+      onExit={handleLeaveRoom}
+      roomId={roomState?.id}
     />
   );
 }

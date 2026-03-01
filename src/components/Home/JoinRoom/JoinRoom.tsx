@@ -25,20 +25,19 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
       setRoomList(rooms);
       setIsRefreshing(false);
     };
-    
+
     const onRoomsListUpdated = () => {
       socketService.getRooms();
     };
 
-    socketService.socket?.on("rooms_list", onRoomsList);
-    socketService.socket?.on("rooms_list_updated", onRoomsListUpdated);
+    socketService.socket?.on('rooms_list', onRoomsList);
+    socketService.socket?.on('rooms_list_updated', onRoomsListUpdated);
 
-    // Initial fetch
     refreshRooms();
 
     return () => {
-      socketService.socket?.off("rooms_list", onRoomsList);
-      socketService.socket?.off("rooms_list_updated", onRoomsListUpdated);
+      socketService.socket?.off('rooms_list', onRoomsList);
+      socketService.socket?.off('rooms_list_updated', onRoomsListUpdated);
     };
   }, []);
 
@@ -121,6 +120,13 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
                         {room.locked && <Lock size={14} className="text-amber-600" />}
                       </div>
                       <div className="text-xs text-zinc-500 mt-1">{room.script}</div>
+                      <div className="text-[11px] mt-1">
+                        {room.inGame ? (
+                          <span className="text-red-400">状态：游戏中（不可加入）</span>
+                        ) : (
+                          <span className="text-emerald-400">状态：等待中</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-xs text-zinc-500 font-mono">

@@ -1,11 +1,11 @@
 import { io, Socket } from "socket.io-client";
+import type { GameSettings, AIFunctionType, AIProviderType } from "../types/Settings";
 
 class SocketService {
   public socket: Socket | null = null;
 
   connect() {
     if (this.socket) return;
-    // Connect to the server
     this.socket = io("ws://localhost:3000", {
       transports: ["websocket"],
     });
@@ -31,7 +31,7 @@ class SocketService {
   joinRoom(roomId: string, playerName: string) {
     this.socket?.emit("join_room", { roomId, playerName });
   }
-  
+
   getRooms() {
     this.socket?.emit("get_rooms");
   }
@@ -41,15 +41,48 @@ class SocketService {
   }
 
   sendChat(roomId: string, message: string) {
-    this.socket?.emit("send_chat", { roomId, message });
+    this.socket?.emit("chat_message", { roomId, message });
   }
 
-  sendAction(roomId: string, action: any) {
-    this.socket?.emit("player_action", { roomId, action });
+  submitAction(roomId: string, action: string) {
+    this.socket?.emit("submit_action", { roomId, action });
   }
 
-  updatePlayerApi(roomId: string, apiId: string) {
-    this.socket?.emit("update_player_api", { roomId, apiId });
+  togglePlayerAIFunction(roomId: string, functionType: AIFunctionType) {
+    this.socket?.emit("toggle_player_ai_function", { roomId, functionType });
+  }
+
+  updatePlayerAIConfig(roomId: string, aiSettings: GameSettings["ai"]) {
+    this.socket?.emit("update_player_ai_config", { roomId, aiSettings });
+  }
+
+  async fetchPromptDefaults() {
+    const response = await fetch("/api/prompts/defaults");
+    if (!response.ok) {
+      throw new Error("获取默认提示词失败");
+    }
+    return response.json();
+  }
+
+  async fetchModels(args: {
+    provider: AIProviderType;
+    endpoint: string;
+    apiKey: string;
+  }) {
+    const response = await fetch("/api/models", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(args),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "获取模型失败" }));
+      throw new Error(payload.error || "获取模型失败");
+    }
+
+    return response.json() as Promise<{ models: Array<{ id: string; name: string }> }>;
   }
 }
 

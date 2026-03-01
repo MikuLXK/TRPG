@@ -1,0 +1,4 @@
+以下是行动收集结果（JSON）：
+{{groupedActionsJson}}
+
+请根据每个分组行动生成剧情推进文本。

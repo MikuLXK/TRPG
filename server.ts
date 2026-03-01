@@ -6,6 +6,13 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { promises as fs } from "fs";
+import { getScriptById } from "./src/data/scripts";
+import type {
+  CharacterAttributeBlock,
+  PlayerCharacterProfile,
+  ScriptDefinition,
+  ScriptRoleTemplate
+} from "./src/types/Script";
 
 dotenv.config();
 
@@ -61,6 +68,8 @@ interface Player {
   role?: string;
   apiFunctions: Record<AIFunctionType, boolean>;
   aiSettings: PlayerAISettings;
+  selectedRoleTemplateId: string | null;
+  characterProfile: PlayerCharacterProfile;
 }
 
 interface Room {
@@ -77,6 +86,7 @@ interface Room {
   maxPlayers: number;
   functionRotationIndex: Record<AIFunctionType, number>;
   emptySince: number | null;
+  script: ScriptDefinition;
 }
 
 const FUNCTION_TYPES: AIFunctionType[] = ["actionCollector", "mainStory", "stateProcessor"];
@@ -114,6 +124,137 @@ const generateRoomId = () => Math.random().toString(36).substring(2, 8).toUpperC
 
 const cloneDefaultAISettings = (): PlayerAISettings => {
   return JSON.parse(JSON.stringify(defaultAISettings)) as PlayerAISettings;
+};
+
+const createEmptyAttributes = (): CharacterAttributeBlock => ({
+  力量: 0,
+  敏捷: 0,
+  体质: 0,
+  智力: 0,
+  感知: 0,
+  魅力: 0
+});
+
+const createDefaultCharacterProfile = (template: ScriptRoleTemplate): PlayerCharacterProfile => ({
+  characterName: "",
+  selectedClassId: template.classOptions[0]?.id || null,
+  selectedGenderId: template.genderOptions[0]?.id || null,
+  selectedRaceId: template.raceOptions[0]?.id || null,
+  selectedBackgroundId: template.backgroundOptions[0]?.id || null,
+  selectedStarterItemIds: [],
+  allocatedPoints: createEmptyAttributes(),
+  calculatedAttributes: { ...template.baseAttributes }
+});
+
+const clampInt = (value: unknown, min: number, max: number) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return min;
+  return Math.max(min, Math.min(max, Math.floor(num)));
+};
+
+const sumAttributes = (attrs: CharacterAttributeBlock) => {
+  return attrs.力量 + attrs.敏捷 + attrs.体质 + attrs.智力 + attrs.感知 + attrs.魅力;
+};
+
+const findRoleTemplate = (room: Room, player: Player) => {
+  if (player.selectedRoleTemplateId) {
+    const selected = room.script.roleTemplates.find((role) => role.id === player.selectedRoleTemplateId);
+    if (selected) return selected;
+  }
+  return room.script.roleTemplates[0];
+};
+
+const addAttributeBlocks = (...blocks: Array<Partial<CharacterAttributeBlock> | undefined>): CharacterAttributeBlock => {
+  const result: CharacterAttributeBlock = createEmptyAttributes();
+  for (const block of blocks) {
+    if (!block) continue;
+    result.力量 += block.力量 ?? 0;
+    result.敏捷 += block.敏捷 ?? 0;
+    result.体质 += block.体质 ?? 0;
+    result.智力 += block.智力 ?? 0;
+    result.感知 += block.感知 ?? 0;
+    result.魅力 += block.魅力 ?? 0;
+  }
+  return result;
+};
+
+const applyCharacterProfilePatch = (room: Room, player: Player, patch: Partial<PlayerCharacterProfile>) => {
+  const template = findRoleTemplate(room, player);
+  if (!template) return;
+
+  const profile = { ...player.characterProfile };
+
+  if (typeof patch.characterName === "string") {
+    profile.characterName = patch.characterName.slice(0, 30);
+  }
+
+  const normalizeOption = (value: unknown, options: Array<{ id: string }>, fallback: string | null) => {
+    if (typeof value !== "string") return fallback;
+    return options.some((opt) => opt.id === value) ? value : fallback;
+  };
+
+  profile.selectedClassId = normalizeOption(patch.selectedClassId, template.classOptions, profile.selectedClassId);
+  profile.selectedGenderId = normalizeOption(patch.selectedGenderId, template.genderOptions, profile.selectedGenderId);
+  profile.selectedRaceId = normalizeOption(patch.selectedRaceId, template.raceOptions, profile.selectedRaceId);
+  profile.selectedBackgroundId = normalizeOption(patch.selectedBackgroundId, template.backgroundOptions, profile.selectedBackgroundId);
+
+  if (Array.isArray(patch.selectedStarterItemIds)) {
+    const allowed = new Set(template.starterItemOptions.map((item) => item.id));
+    profile.selectedStarterItemIds = patch.selectedStarterItemIds
+      .filter((id): id is string => typeof id === "string" && allowed.has(id))
+      .slice(0, template.maxStarterItems);
+  }
+
+  const totalAllocationPoints = sumAttributes({
+    力量: template.allocationPointsByAttribute.力量 ?? 0,
+    敏捷: template.allocationPointsByAttribute.敏捷 ?? 0,
+    体质: template.allocationPointsByAttribute.体质 ?? 0,
+    智力: template.allocationPointsByAttribute.智力 ?? 0,
+    感知: template.allocationPointsByAttribute.感知 ?? 0,
+    魅力: template.allocationPointsByAttribute.魅力 ?? 0
+  });
+
+  if (patch.allocatedPoints && typeof patch.allocatedPoints === "object") {
+    profile.allocatedPoints = {
+      力量: clampInt((patch.allocatedPoints as CharacterAttributeBlock).力量 ?? profile.allocatedPoints.力量, 0, 10),
+      敏捷: clampInt((patch.allocatedPoints as CharacterAttributeBlock).敏捷 ?? profile.allocatedPoints.敏捷, 0, 10),
+      体质: clampInt((patch.allocatedPoints as CharacterAttributeBlock).体质 ?? profile.allocatedPoints.体质, 0, 10),
+      智力: clampInt((patch.allocatedPoints as CharacterAttributeBlock).智力 ?? profile.allocatedPoints.智力, 0, 10),
+      感知: clampInt((patch.allocatedPoints as CharacterAttributeBlock).感知 ?? profile.allocatedPoints.感知, 0, 10),
+      魅力: clampInt((patch.allocatedPoints as CharacterAttributeBlock).魅力 ?? profile.allocatedPoints.魅力, 0, 10)
+    };
+  }
+
+  const classOpt = template.classOptions.find((opt) => opt.id === profile.selectedClassId);
+  const genderOpt = template.genderOptions.find((opt) => opt.id === profile.selectedGenderId);
+  const raceOpt = template.raceOptions.find((opt) => opt.id === profile.selectedRaceId);
+  const backgroundOpt = template.backgroundOptions.find((opt) => opt.id === profile.selectedBackgroundId);
+  const usedPoints = sumAttributes(profile.allocatedPoints);
+  const totalPoints = totalAllocationPoints;
+
+  if (usedPoints > totalPoints) {
+    const ratio = totalPoints / Math.max(1, usedPoints);
+    profile.allocatedPoints = {
+      力量: Math.floor(profile.allocatedPoints.力量 * ratio),
+      敏捷: Math.floor(profile.allocatedPoints.敏捷 * ratio),
+      体质: Math.floor(profile.allocatedPoints.体质 * ratio),
+      智力: Math.floor(profile.allocatedPoints.智力 * ratio),
+      感知: Math.floor(profile.allocatedPoints.感知 * ratio),
+      魅力: Math.floor(profile.allocatedPoints.魅力 * ratio)
+    };
+  }
+
+  profile.calculatedAttributes = addAttributeBlocks(
+    template.baseAttributes,
+    profile.allocatedPoints,
+    classOpt?.attributeBonuses,
+    genderOpt?.attributeBonuses,
+    raceOpt?.attributeBonuses,
+    backgroundOpt?.attributeBonuses
+  );
+
+  player.characterProfile = profile;
+  player.role = [classOpt?.name, raceOpt?.name].filter(Boolean).join("/") || "未分配";
 };
 
 const getPromptPath = (functionType: AIFunctionType, role: PromptRole) => {
@@ -402,7 +543,9 @@ const runMainStory = async (room: Room, groupedActions: unknown) => {
   const connection = getEffectiveConnection(providerPlayer, "mainStory");
   const userTemplate = await readPromptFile("mainStory", "user");
   const modelTemplate = await readPromptFile("mainStory", "model");
-  const systemPrompt = await getPromptSystemOverride(providerPlayer, "mainStory");
+  const systemPromptBase = await getPromptSystemOverride(providerPlayer, "mainStory");
+  const settingPrompt = room.script?.settingPrompt?.trim();
+  const systemPrompt = settingPrompt ? `${settingPrompt}\n\n${systemPromptBase}` : systemPromptBase;
 
   const userPrompt = fillTemplate(userTemplate, {
     groupedActionsJson: JSON.stringify(groupedActions, null, 2)
@@ -509,7 +652,7 @@ io.on("connection", (socket) => {
     const roomList = Object.values(rooms).map((r) => ({
       id: r.id,
       name: r.name,
-      script: r.scriptId,
+      script: r.script.title,
       players: r.players.length,
       maxPlayers: r.maxPlayers,
       locked: !!r.password,
@@ -519,7 +662,18 @@ io.on("connection", (socket) => {
     socket.emit("rooms_list", roomList);
   });
 
-  socket.on("create_room", (data: { roomName: string; scriptId: string; password?: string; intro?: string; playerName: string }) => {
+  socket.on("create_room", (data: { roomName: string; scriptId: string; password?: string; intro?: string; playerName: string; accountUsername?: string }) => {
+    const script = getScriptById(data.scriptId);
+    if (!script) {
+      socket.emit("error", "无效剧本");
+      return;
+    }
+
+    if (!script.roleTemplates.length) {
+      socket.emit("error", "该剧本未配置角色模板");
+      return;
+    }
+
     const roomId = generateRoomId();
 
     const newRoom: Room = {
@@ -542,7 +696,9 @@ io.on("connection", (socket) => {
           mainStory: false,
           stateProcessor: false
         },
-        aiSettings: cloneDefaultAISettings()
+        aiSettings: cloneDefaultAISettings(),
+        selectedRoleTemplateId: script.roleTemplates[0]?.id || null,
+        characterProfile: createDefaultCharacterProfile(script.roleTemplates[0])
       }],
       status: "waiting",
       currentRound: 1,
@@ -553,7 +709,8 @@ io.on("connection", (socket) => {
         mainStory: 0,
         stateProcessor: 0
       },
-      emptySince: null
+      emptySince: null,
+      script
     };
 
     rooms[roomId] = newRoom;
@@ -584,6 +741,12 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const firstTemplate = room.script.roleTemplates[0];
+    if (!firstTemplate) {
+      socket.emit("error", "该剧本未配置角色模板");
+      return;
+    }
+
     const newPlayer: Player = {
       id: socket.id,
       name: playerName,
@@ -595,7 +758,9 @@ io.on("connection", (socket) => {
         mainStory: false,
         stateProcessor: false
       },
-      aiSettings: cloneDefaultAISettings()
+      aiSettings: cloneDefaultAISettings(),
+      selectedRoleTemplateId: firstTemplate.id,
+      characterProfile: createDefaultCharacterProfile(firstTemplate)
     };
 
     room.players.push(newPlayer);
@@ -687,6 +852,51 @@ io.on("connection", (socket) => {
         }
       }
     };
+
+    io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("select_role_template", ({ roomId, roleTemplateId }: { roomId: string; roleTemplateId: string }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.status !== "waiting") {
+      socket.emit("error", "仅可在等待大厅选择角色");
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    const roleExists = room.script.roleTemplates.some((role) => role.id === roleTemplateId);
+    if (!roleExists) {
+      socket.emit("error", "角色模板不存在");
+      return;
+    }
+
+    player.selectedRoleTemplateId = roleTemplateId;
+    const selectedTemplate = room.script.roleTemplates.find((role) => role.id === roleTemplateId);
+    if (selectedTemplate) {
+      player.characterProfile = createDefaultCharacterProfile(selectedTemplate);
+      applyCharacterProfilePatch(room, player, {});
+    }
+
+    io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("update_character_profile", ({ roomId, profile }: { roomId: string; profile: Partial<PlayerCharacterProfile> }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.status !== "waiting") {
+      socket.emit("error", "仅可在等待大厅编辑角色信息");
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    applyCharacterProfilePatch(room, player, profile);
 
     io.to(roomId).emit("room_updated", room);
   });

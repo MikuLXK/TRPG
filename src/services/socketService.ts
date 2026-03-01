@@ -1,5 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import type { GameSettings, AIFunctionType, AIProviderType } from "../types/Settings";
+import type { PlayerCharacterProfile } from "../types/Script";
 
 class SocketService {
   public socket: Socket | null = null;
@@ -24,7 +25,7 @@ class SocketService {
     this.socket?.disconnect();
   }
 
-  createRoom(data: { roomName: string; scriptId: string; password?: string; intro?: string; playerName: string }) {
+  createRoom(data: { roomName: string; scriptId: string; password?: string; intro?: string; playerName: string; accountUsername?: string }) {
     this.socket?.emit("create_room", data);
   }
 
@@ -54,6 +55,14 @@ class SocketService {
 
   updatePlayerAIConfig(roomId: string, aiSettings: GameSettings["ai"]) {
     this.socket?.emit("update_player_ai_config", { roomId, aiSettings });
+  }
+
+  selectRoleTemplate(roomId: string, roleTemplateId: string) {
+    this.socket?.emit("select_role_template", { roomId, roleTemplateId });
+  }
+
+  updateCharacterProfile(roomId: string, profile: Partial<PlayerCharacterProfile>) {
+    this.socket?.emit("update_character_profile", { roomId, profile });
   }
 
   async fetchPromptDefaults() {

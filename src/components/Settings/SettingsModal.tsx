@@ -12,6 +12,7 @@ interface SettingsModalProps {
   initialTab?: Tab;
   onExitToHome?: () => void;
   roomId?: string;
+  accountUsername?: string;
 }
 
 type Tab = 'visual' | 'prompt' | 'api' | 'storage';
@@ -82,7 +83,7 @@ const mergeSettings = (base: GameSettings, saved: Partial<GameSettings>): GameSe
 
 const getDefaultEndpointByProvider = (provider: AIProviderType) => providerEndpointMap[provider] ?? '';
 
-export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', onExitToHome, roomId }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', onExitToHome, roomId, accountUsername = '' }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [settings, setSettings] = useState<GameSettings>(deepCloneSettings(defaultSettings));
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
@@ -104,7 +105,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
       setActiveTab(initialTab);
       void loadSettings();
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, accountUsername]);
 
   const loadSettings = async () => {
     try {
@@ -124,7 +125,9 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
         setPromptDefaults(null);
       }
 
-      const savedSettings = await dbService.getSetting('gameSettings');
+      const savedSettings = accountUsername
+        ? await dbService.getUserSetting(accountUsername, 'gameSettings')
+        : await dbService.getSetting('gameSettings');
       if (savedSettings) {
         nextSettings = mergeSettings(nextSettings, savedSettings as Partial<GameSettings>);
       }
@@ -138,7 +141,11 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
 
   const saveSettings = async (successText: string) => {
     try {
-      await dbService.saveSetting('gameSettings', settings);
+      if (accountUsername) {
+        await dbService.saveUserSetting(accountUsername, 'gameSettings', settings);
+      } else {
+        await dbService.saveSetting('gameSettings', settings);
+      }
       if (roomId) {
         socketService.updatePlayerAIConfig(roomId, settings.ai);
       }
@@ -237,7 +244,13 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
                 showToast={showToast}
               />
             )}
-            {activeTab === 'storage' && <StorageSettings showToast={showToast} setConfirmDialog={setConfirmDialog} />}
+            {activeTab === 'storage' && (
+              <StorageSettings
+                showToast={showToast}
+                setConfirmDialog={setConfirmDialog}
+                accountUsername={accountUsername}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -714,18 +727,18 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
   );
 }
 
-function StorageSettings({ showToast, setConfirmDialog }: { showToast: (msg: string, type: ToastType) => void, setConfirmDialog: any }) {
+function StorageSettings({ showToast, setConfirmDialog, accountUsername }: { showToast: (msg: string, type: ToastType) => void, setConfirmDialog: any, accountUsername?: string }) {
   const [usage, setUsage] = useState({ usage: 0, quota: 0 });
   const [saveCount, setSaveCount] = useState(0);
 
   useEffect(() => {
     void loadStorageInfo();
-  }, []);
+  }, [accountUsername]);
 
   const loadStorageInfo = async () => {
     const info = await dbService.getStorageUsage();
     setUsage(info);
-    const saves = await dbService.getAllSaves();
+    const saves = accountUsername ? await dbService.getAllUserSaves(accountUsername) : await dbService.getAllSaves();
     setSaveCount(saves.length);
   };
 

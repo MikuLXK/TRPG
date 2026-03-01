@@ -1,26 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ChevronLeft, ArrowRight, Play } from 'lucide-react';
 import ScriptSelection from '../ScriptSelection/ScriptSelection';
-import { useScripts } from '../../../hooks/useScripts'; 
+import { useScripts } from '../../../hooks/useScripts';
 
 interface CreateRoomProps {
   playerName: string;
   setPlayerName: (name: string) => void;
   onBack: () => void;
   onCreateRoom: (params: { roomName: string, scriptId: string, password?: string, intro?: string }) => void;
+  initialDraft?: { roomName?: string; scriptId?: string; password?: string; intro?: string } | null;
+  onDraftChange?: (draft: { roomName: string; scriptId: string; password?: string; intro?: string }) => void;
 }
 
-export default function CreateRoom({ playerName, setPlayerName, onBack, onCreateRoom }: CreateRoomProps) {
+export default function CreateRoom({ playerName, setPlayerName, onBack, onCreateRoom, initialDraft = null, onDraftChange }: CreateRoomProps) {
   const [step, setStep] = useState<'script' | 'info'>('script');
-  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
-  const [roomName, setRoomName] = useState('');
-  const [roomPassword, setRoomPassword] = useState('');
-  const [roomIntro, setRoomIntro] = useState('');
+  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(initialDraft?.scriptId || null);
+  const [roomName, setRoomName] = useState(initialDraft?.roomName || '');
+  const [roomPassword, setRoomPassword] = useState(initialDraft?.password || '');
+  const [roomIntro, setRoomIntro] = useState(initialDraft?.intro || '');
 
   const { scripts } = useScripts();
   const selectedScript = scripts.find(s => s.id === selectedScriptId);
   const selectedScriptTitle = selectedScript ? selectedScript.title : '';
+
+  useEffect(() => {
+    if (!onDraftChange || !selectedScriptId) return;
+    onDraftChange({
+      roomName,
+      scriptId: selectedScriptId,
+      password: roomPassword,
+      intro: roomIntro,
+    });
+  }, [onDraftChange, roomName, selectedScriptId, roomPassword, roomIntro]);
 
   const handleCreate = () => {
     if (!selectedScriptId) return;

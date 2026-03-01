@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { socketService } from '../../services/socketService';
+import { dbService } from '../../services/dbService';
 import SettingsModal from '../Settings/SettingsModal';
 import Toast, { ToastType } from '../UI/Toast';
 import MainMenu from './MainMenu/MainMenu';
@@ -9,13 +10,17 @@ import JoinRoom from './JoinRoom/JoinRoom';
 
 interface HomeProps {
   onJoinGame: (roomState: any) => void;
+  accountUsername: string;
+  initialPlayerName?: string;
+  onLogout?: () => void;
 }
 
-export default function Home({ onJoinGame }: HomeProps) {
+export default function Home({ onJoinGame, accountUsername, initialPlayerName = '', onLogout }: HomeProps) {
   const [view, setView] = useState<'main' | 'create' | 'join'>('main');
-  const [playerName, setPlayerName] = useState('');
+  const [playerName, setPlayerName] = useState(initialPlayerName);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
+  const [createRoomDraft, setCreateRoomDraft] = useState<{ roomName?: string; scriptId?: string; password?: string; intro?: string } | null>(null);
 
   const showToast = (message: string, type: ToastType = 'info') => {
     setToast({ message, type });
@@ -26,8 +31,20 @@ export default function Home({ onJoinGame }: HomeProps) {
 
     const socket = socketService.socket;
     if (socket) {
-      const onRoomCreated = ({ roomState }: { roomState: any }) => {
+      const onRoomCreated = async ({ roomState }: { roomState: any }) => {
         console.log("Room created, joining game:", roomState.id);
+        try {
+          await dbService.addUserCreatedRoom(accountUsername, {
+            id: roomState.id,
+            roomName: roomState.name,
+            scriptId: roomState.scriptId,
+            scriptTitle: roomState.script?.title,
+            intro: roomState.intro,
+            createdAt: Date.now(),
+          });
+        } catch {
+          // ignore storage errors
+        }
         onJoinGame(roomState);
       };
 
@@ -53,7 +70,56 @@ export default function Home({ onJoinGame }: HomeProps) {
         socket.off("error", onError);
       };
     }
-  }, [onJoinGame]);
+  }, [accountUsername, onJoinGame]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccountScopedData = async () => {
+      try {
+        const [savedPlayerName, savedDraft] = await Promise.all([
+          dbService.getUserSetting(accountUsername, 'playerName'),
+          dbService.getUserRoomDraft(accountUsername),
+        ]);
+
+        if (cancelled) return;
+
+        if (typeof savedPlayerName === 'string' && savedPlayerName.trim()) {
+          setPlayerName(savedPlayerName);
+        } else {
+          setPlayerName(initialPlayerName);
+        }
+
+        if (savedDraft && typeof savedDraft === 'object') {
+          setCreateRoomDraft(savedDraft);
+        } else {
+          setCreateRoomDraft(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPlayerName(initialPlayerName);
+          setCreateRoomDraft(null);
+        }
+      }
+    };
+
+    void loadAccountScopedData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountUsername, initialPlayerName]);
+
+  useEffect(() => {
+    const trimmed = playerName.trim();
+    if (!trimmed) return;
+
+    const timer = window.setTimeout(() => {
+      void dbService.saveUserSetting(accountUsername, 'playerName', trimmed);
+    }, 200);
+
+    return () => window.clearTimeout(timer);
+  }, [accountUsername, playerName]);
 
   const handleCreateRoom = (params: { roomName: string, scriptId: string, password?: string, intro?: string }) => {
     if (!playerName.trim()) {
@@ -62,7 +128,8 @@ export default function Home({ onJoinGame }: HomeProps) {
     }
     socketService.createRoom({
       ...params,
-      playerName
+      playerName,
+      accountUsername,
     });
   };
 
@@ -87,6 +154,11 @@ export default function Home({ onJoinGame }: HomeProps) {
             setPlayerName={setPlayerName}
             onBack={() => setView('main')}
             onCreateRoom={handleCreateRoom}
+            initialDraft={createRoomDraft}
+            onDraftChange={(draft) => {
+              setCreateRoomDraft(draft);
+              void dbService.saveUserRoomDraft(accountUsername, draft);
+            }}
           />
         );
       case 'join':
@@ -116,6 +188,16 @@ export default function Home({ onJoinGame }: HomeProps) {
 
   return (
     <div className="w-full h-screen bg-zinc-950 text-zinc-200 font-sans overflow-hidden selection:bg-amber-500/30 selection:text-amber-200 relative">
+      {onLogout && (
+        <button
+          type="button"
+          onClick={onLogout}
+          className="absolute top-4 right-4 z-20 px-3 py-1.5 text-xs rounded border border-zinc-700 text-zinc-300 hover:text-red-300 hover:border-red-500/40"
+        >
+          退出登录
+        </button>
+      )}
+
       {/* Background Effects */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-amber-900/20 via-zinc-950 to-zinc-950 pointer-events-none"></div>
       <div className="absolute inset-0 opacity-10 pointer-events-none"
@@ -139,6 +221,7 @@ export default function Home({ onJoinGame }: HomeProps) {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        accountUsername={accountUsername}
       />
     </div>
   );

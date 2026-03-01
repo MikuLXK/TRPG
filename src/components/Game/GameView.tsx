@@ -12,9 +12,10 @@ interface GameViewProps {
   roomState: any;
   onExit: () => void;
   roomId?: string;
+  accountUsername?: string;
 }
 
-export default function GameView({ roomState, onExit, roomId }: GameViewProps) {
+export default function GameView({ roomState, onExit, roomId, accountUsername = '' }: GameViewProps) {
   const [游戏数据, set游戏数据] = useState<游戏状态>(初始游戏状态);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -191,6 +192,7 @@ export default function GameView({ roomState, onExit, roomId }: GameViewProps) {
         onClose={() => setIsSettingsOpen(false)}
         onExitToHome={onExit}
         roomId={roomId}
+        accountUsername={accountUsername}
       />
     </div>
   );

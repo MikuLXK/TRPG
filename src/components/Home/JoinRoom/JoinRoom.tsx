@@ -7,7 +7,7 @@ interface JoinRoomProps {
   playerName: string;
   setPlayerName: (name: string) => void;
   onBack: () => void;
-  onJoinRoom: (roomId: string) => void;
+  onJoinRoom: (roomId: string, password?: string) => void;
   accountUsername: string;
 }
 
@@ -25,6 +25,7 @@ interface RoomListItem {
 
 export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom, accountUsername }: JoinRoomProps) {
   const [joinRoomId, setJoinRoomId] = useState('');
+  const [joinRoomPassword, setJoinRoomPassword] = useState('');
   const [roomList, setRoomList] = useState<RoomListItem[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -59,7 +60,7 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
 
   const handleJoin = () => {
     if (joinRoomId) {
-      onJoinRoom(joinRoomId);
+      onJoinRoom(joinRoomId, joinRoomPassword.trim() || undefined);
     }
   };
 
@@ -88,7 +89,7 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
           <div className="p-4 bg-zinc-950/50 rounded-xl border border-zinc-800 flex gap-4 items-end">
             <div className="flex-1 space-y-2">
               <label className="text-xs text-zinc-500 uppercase tracking-wider font-bold">快速加入</label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <input
                   type="text"
                   value={playerName}
@@ -103,6 +104,13 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 focus:border-emerald-500 outline-none text-sm font-mono uppercase"
                   placeholder="房间号 (如: X7J9K2)"
                   maxLength={6}
+                />
+                <input
+                  type="password"
+                  value={joinRoomPassword}
+                  onChange={(e) => setJoinRoomPassword(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 focus:border-emerald-500 outline-none text-sm"
+                  placeholder="房间密码（可选）"
                 />
               </div>
             </div>
@@ -123,7 +131,10 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
                     <button
                       key={`reconnect-${room.id}`}
                       type="button"
-                      onClick={() => setJoinRoomId(room.id)}
+                      onClick={() => {
+                        setJoinRoomId(room.id);
+                        setJoinRoomPassword('');
+                      }}
                       className="w-full text-left px-3 py-2 rounded-lg border border-amber-500/30 bg-zinc-900/70 hover:bg-zinc-900 text-zinc-200"
                     >
                       <div className="text-sm font-semibold">{room.name}</div>
@@ -152,7 +163,12 @@ export default function JoinRoom({ playerName, setPlayerName, onBack, onJoinRoom
                 {roomList.map((room) => (
                   <div
                     key={room.id}
-                    onClick={() => setJoinRoomId(room.id)}
+                    onClick={() => {
+                      setJoinRoomId(room.id);
+                      if (!room.locked) {
+                        setJoinRoomPassword('');
+                      }
+                    }}
                     className={`bg-zinc-950/50 border rounded-xl p-4 flex justify-between items-center cursor-pointer transition-all ${joinRoomId === room.id ? 'border-amber-500/50 bg-amber-500/10' : 'border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900'}`}
                   >
                     <div>

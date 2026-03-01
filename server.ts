@@ -58,6 +58,14 @@ interface PlayerAISettings {
   stateProcessor: { connection: AIConnectionConfig; prompt: AIPromptConfig };
 }
 
+interface SavedCharacter {
+  id: string;
+  name: string;
+  roleTemplateId: string;
+  profile: PlayerCharacterProfile;
+  claimedBy: string | null;
+}
+
 interface Player {
   id: string;
   name: string;
@@ -69,6 +77,8 @@ interface Player {
   role?: string;
   isOnline: boolean;
   lastSeenAt: number | null;
+  selectedSavedCharacterId: string | null;
+  canCreateCustomCharacter: boolean;
   apiFunctions: Record<AIFunctionType, boolean>;
   aiSettings: PlayerAISettings;
   selectedRoleTemplateId: string | null;
@@ -85,6 +95,8 @@ interface Room {
   players: Player[];
   status: RoomStatus;
   hasStarted: boolean;
+  gameSetupMode: "new_game" | "load_save";
+  savedCharacters: SavedCharacter[];
   currentRound: number;
   logs: any[];
   maxPlayers: number;
@@ -601,6 +613,98 @@ const runStateProcessor = async (room: Room, storyText: string) => {
 
 const getActivePlayers = (room: Room) => room.players.filter((p) => p.isOnline !== false);
 
+const syncHostIfNeeded = (room: Room) => {
+  const activePlayers = getActivePlayers(room);
+  const hostStillOnline = activePlayers.some((p) => p.id === room.hostId);
+  if (!hostStillOnline && activePlayers.length > 0) {
+    room.hostId = activePlayers[0].id;
+  }
+};
+
+const ensureSavedCharactersForLoadMode = (room: Room) => {
+  if (room.savedCharacters.length > 0) return;
+
+  const now = Date.now();
+  room.savedCharacters = room.script.roleTemplates.slice(0, room.maxPlayers).map((template, index) => {
+    const profile = createDefaultCharacterProfile(template);
+    profile.characterName = template.name;
+
+    return {
+      id: `saved-${now}-${index + 1}`,
+      name: template.name,
+      roleTemplateId: template.id,
+      profile,
+      claimedBy: null
+    };
+  });
+};
+
+const switchGameSetupMode = (room: Room, mode: "new_game" | "load_save") => {
+  room.gameSetupMode = mode;
+
+  if (mode === "new_game") {
+    room.savedCharacters.forEach((saved) => {
+      saved.claimedBy = null;
+    });
+
+    room.players.forEach((player) => {
+      player.selectedSavedCharacterId = null;
+      player.canCreateCustomCharacter = true;
+    });
+    return;
+  }
+
+  ensureSavedCharactersForLoadMode(room);
+
+  room.savedCharacters.forEach((saved) => {
+    saved.claimedBy = null;
+  });
+
+  room.players.forEach((player) => {
+    player.selectedSavedCharacterId = null;
+    player.canCreateCustomCharacter = false;
+  });
+};
+
+const claimSavedCharacterForPlayer = (room: Room, player: Player, characterId: string) => {
+  const savedCharacter = room.savedCharacters.find((saved) => saved.id === characterId);
+  if (!savedCharacter) {
+    throw new Error("存档角色不存在");
+  }
+
+  if (savedCharacter.claimedBy && savedCharacter.claimedBy !== player.id) {
+    throw new Error("该角色已被其他玩家选择");
+  }
+
+  room.savedCharacters.forEach((saved) => {
+    if (saved.claimedBy === player.id) {
+      saved.claimedBy = null;
+    }
+  });
+
+  savedCharacter.claimedBy = player.id;
+  player.selectedSavedCharacterId = savedCharacter.id;
+  player.selectedRoleTemplateId = savedCharacter.roleTemplateId;
+  player.characterProfile = JSON.parse(JSON.stringify(savedCharacter.profile)) as PlayerCharacterProfile;
+  player.canCreateCustomCharacter = false;
+  applyCharacterProfilePatch(room, player, {});
+};
+
+const setPlayerCustomCharacterMode = (room: Room, player: Player, enabled: boolean) => {
+  if (enabled) {
+    room.savedCharacters.forEach((saved) => {
+      if (saved.claimedBy === player.id) {
+        saved.claimedBy = null;
+      }
+    });
+    player.selectedSavedCharacterId = null;
+    player.canCreateCustomCharacter = true;
+    return;
+  }
+
+  player.canCreateCustomCharacter = false;
+};
+
 const removePlayerFromRoom = (socketId: string) => {
   const roomId = socketRoomIndex[socketId];
   if (!roomId) return;
@@ -618,6 +722,11 @@ const removePlayerFromRoom = (socketId: string) => {
     targetPlayer.isReady = false;
     targetPlayer.action = "";
   } else {
+    room.savedCharacters.forEach((saved) => {
+      if (saved.claimedBy === socketId) {
+        saved.claimedBy = null;
+      }
+    });
     room.players = room.players.filter((p) => p.id !== socketId);
   }
 
@@ -625,9 +734,7 @@ const removePlayerFromRoom = (socketId: string) => {
     room.emptySince = Date.now();
   } else {
     room.emptySince = null;
-    if (!room.hasStarted && room.hostId === socketId) {
-      room.hostId = room.players[0].id;
-    }
+    syncHostIfNeeded(room);
   }
 
   io.to(roomId).emit("room_updated", room);
@@ -712,7 +819,7 @@ io.on("connection", (socket) => {
       hostId: socket.id,
       name: data.roomName,
       scriptId: data.scriptId,
-      password: data.password,
+      password: (data.password || "").trim() || undefined,
       intro: data.intro,
       players: [{
         id: socket.id,
@@ -725,6 +832,8 @@ io.on("connection", (socket) => {
         avatar: "bg-amber-500",
         isOnline: true,
         lastSeenAt: null,
+        selectedSavedCharacterId: null,
+        canCreateCustomCharacter: true,
         apiFunctions: {
           actionCollector: false,
           mainStory: false,
@@ -736,6 +845,8 @@ io.on("connection", (socket) => {
       }],
       status: "waiting",
       hasStarted: false,
+      gameSetupMode: "new_game",
+      savedCharacters: [],
       currentRound: 1,
       logs: [],
       maxPlayers: 4,
@@ -758,10 +869,15 @@ io.on("connection", (socket) => {
     console.log(`Room created: ${roomId} (${data.roomName}) by ${data.playerName}`);
   });
 
-  socket.on("join_room", ({ roomId, playerName, accountUsername }: { roomId: string; playerName: string; accountUsername?: string }) => {
+  socket.on("join_room", ({ roomId, playerName, accountUsername, password }: { roomId: string; playerName: string; accountUsername?: string; password?: string }) => {
     const room = rooms[roomId];
     if (!room) {
       socket.emit("error", "房间不存在");
+      return;
+    }
+
+    if (room.password && room.password !== (password ?? "")) {
+      socket.emit("error", "房间密码错误");
       return;
     }
 
@@ -801,6 +917,11 @@ io.on("connection", (socket) => {
       socketRoomIndex[socket.id] = roomId;
       room.emptySince = null;
       socket.join(roomId);
+      if (getActivePlayers(room).length === 1) {
+        room.hostId = socket.id;
+      } else {
+        syncHostIfNeeded(room);
+      }
       io.to(roomId).emit("room_updated", room);
       io.emit("rooms_list_updated");
       console.log(`${playerName} reconnected to room ${roomId}`);
@@ -840,6 +961,12 @@ io.on("connection", (socket) => {
       room.emptySince = null;
       socket.join(roomId);
 
+      if (getActivePlayers(room).length === 1) {
+        room.hostId = socket.id;
+      } else {
+        syncHostIfNeeded(room);
+      }
+
       io.to(roomId).emit("room_updated", room);
       io.emit("rooms_list_updated");
       console.log(`${playerName} rejoined room ${roomId}`);
@@ -861,6 +988,8 @@ io.on("connection", (socket) => {
       location: "初始地点",
       isOnline: true,
       lastSeenAt: null,
+      selectedSavedCharacterId: null,
+      canCreateCustomCharacter: room.gameSetupMode === "new_game",
       apiFunctions: {
         actionCollector: false,
         mainStory: false,
@@ -875,6 +1004,12 @@ io.on("connection", (socket) => {
     room.emptySince = null;
     socketRoomIndex[socket.id] = roomId;
     socket.join(roomId);
+
+    if (getActivePlayers(room).length === 1) {
+      room.hostId = socket.id;
+    } else {
+      syncHostIfNeeded(room);
+    }
 
     io.to(roomId).emit("room_updated", room);
     io.emit("rooms_list_updated");
@@ -982,6 +1117,11 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (room.gameSetupMode === "load_save" && !player.canCreateCustomCharacter) {
+      socket.emit("error", "加载存档模式下，请先选择存档角色或切换到创建角色");
+      return;
+    }
+
     player.selectedRoleTemplateId = roleTemplateId;
     const selectedTemplate = room.script.roleTemplates.find((role) => role.id === roleTemplateId);
     if (selectedTemplate) {
@@ -1004,8 +1144,80 @@ io.on("connection", (socket) => {
     const player = room.players.find((p) => p.id === socket.id);
     if (!player) return;
 
+    if (room.gameSetupMode === "load_save" && !player.canCreateCustomCharacter) {
+      socket.emit("error", "加载存档模式下，请先选择存档角色或切换到创建角色");
+      return;
+    }
+
     applyCharacterProfilePatch(room, player, profile);
 
+    io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("set_game_setup_mode", ({ roomId, mode }: { roomId: string; mode: "new_game" | "load_save" }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.hostId !== socket.id) {
+      socket.emit("error", "只有房主可以切换游戏模式");
+      return;
+    }
+
+    if (room.hasStarted || room.status !== "waiting") {
+      socket.emit("error", "游戏开始后不可切换模式");
+      return;
+    }
+
+    switchGameSetupMode(room, mode);
+    io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("claim_saved_character", ({ roomId, characterId }: { roomId: string; characterId: string }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.status !== "waiting") {
+      socket.emit("error", "仅可在等待大厅选择角色");
+      return;
+    }
+
+    if (room.gameSetupMode !== "load_save") {
+      socket.emit("error", "当前不是加载存档模式");
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    try {
+      claimSavedCharacterForPlayer(room, player, characterId);
+    } catch (error) {
+      socket.emit("error", String((error as Error)?.message ?? error));
+      return;
+    }
+
+    io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on("set_custom_character_mode", ({ roomId, enabled }: { roomId: string; enabled: boolean }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.status !== "waiting") {
+      socket.emit("error", "仅可在等待大厅切换角色创建模式");
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    if (room.gameSetupMode !== "load_save") {
+      player.canCreateCustomCharacter = true;
+      io.to(roomId).emit("room_updated", room);
+      return;
+    }
+
+    setPlayerCustomCharacterMode(room, player, enabled);
     io.to(roomId).emit("room_updated", room);
   });
 
@@ -1021,6 +1233,15 @@ io.on("connection", (socket) => {
     if (!validateStartCondition(room)) {
       socket.emit("error", "三个AI功能都至少需要一名玩家提供API");
       return;
+    }
+
+    if (room.gameSetupMode === "load_save") {
+      const activePlayers = getActivePlayers(room);
+      const hasUnassigned = activePlayers.some((player) => !player.selectedSavedCharacterId && !player.canCreateCustomCharacter);
+      if (hasUnassigned) {
+        socket.emit("error", "加载存档模式下，仍有玩家未选择角色或未进入创建角色");
+        return;
+      }
     }
 
     room.status = "playing";

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Users, Copy, Check, Play, LogOut, User, Server, ScrollText } from 'lucide-react';
+import { Users, Copy, Check, Play, LogOut, User, Server, ScrollText, Archive, Sparkles, UserPlus } from 'lucide-react';
 import { socketService } from '../../services/socketService';
 import ChatPanel from '../Panels/ChatPanel';
 import { 游戏日志 } from '../../types/GameData';
@@ -33,6 +33,8 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
   const selfId = socketService.socket?.id;
   const script = roomState.script;
   const roleTemplates = script?.roleTemplates || [];
+  const savedCharacters = roomState.savedCharacters || [];
+  const gameSetupMode: 'new_game' | 'load_save' = roomState.gameSetupMode || 'new_game';
 
   useEffect(() => {
     const socket = socketService.socket;
@@ -53,6 +55,12 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
     }
   }, [roomState]);
 
+  useEffect(() => {
+    if (roomState?.status && roomState.status !== 'waiting') {
+      onStartGame();
+    }
+  }, [roomState?.status, onStartGame]);
+
   const selfPlayer = useMemo(() => players.find((p: any) => p.id === selfId), [players, selfId]);
 
   const selectedTemplate = useMemo(() => {
@@ -60,6 +68,10 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
   }, [roleTemplates, selfPlayer?.selectedRoleTemplateId]);
 
   const selfProfile: PlayerCharacterProfile | null = selfPlayer?.characterProfile || null;
+  const isLoadMode = gameSetupMode === 'load_save';
+  const selfCanCreateCustomCharacter = Boolean(selfPlayer?.canCreateCustomCharacter);
+  const selfSelectedSavedCharacterId = selfPlayer?.selectedSavedCharacterId || null;
+  const canEditCustomCharacter = !isLoadMode || selfCanCreateCustomCharacter;
 
   useEffect(() => {
     setCharacterNameInput(selfProfile?.characterName || '');
@@ -129,7 +141,6 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
 
   const handleStartGame = () => {
     socketService.startGame(roomState.id);
-    onStartGame();
   };
 
   const handleSendChat = (text: string) => {
@@ -157,6 +168,21 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
   const selectRoleTemplate = (roleTemplateId: string) => {
     if (!roomState?.id) return;
     socketService.selectRoleTemplate(roomState.id, roleTemplateId);
+  };
+
+  const setGameSetupMode = (mode: 'new_game' | 'load_save') => {
+    if (!roomState?.id || !isHost) return;
+    socketService.setGameSetupMode(roomState.id, mode);
+  };
+
+  const claimSavedCharacter = (characterId: string) => {
+    if (!roomState?.id) return;
+    socketService.claimSavedCharacter(roomState.id, characterId);
+  };
+
+  const setCustomCharacterMode = (enabled: boolean) => {
+    if (!roomState?.id) return;
+    socketService.setCustomCharacterMode(roomState.id, enabled);
   };
 
   const updateAttributePoint = (key: keyof CharacterAttributeBlock, value: number) => {
@@ -195,7 +221,11 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
     updateProfile({ selectedStarterItemIds: next });
   };
 
+  const activePlayers = players.filter((p: any) => p.isOnline !== false);
   const allFunctionsCovered = FUNCTION_TYPES.every((type) => getFunctionProviders(type).length > 0);
+  const hasUnassignedLoadModePlayers =
+    isLoadMode &&
+    activePlayers.some((player: any) => !player.selectedSavedCharacterId && !player.canCreateCustomCharacter);
 
   const renderProviderSelector = (player: any) => {
     if (player.id !== selfId) {
@@ -302,178 +332,269 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
               })}
             </div>
 
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+              <div className="text-xs font-bold text-zinc-400">开局模式</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={!isHost}
+                  onClick={() => setGameSetupMode('new_game')}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    gameSetupMode === 'new_game'
+                      ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300'
+                      : 'border-zinc-700 bg-zinc-900 text-zinc-300'
+                  } ${!isHost ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  <Sparkles size={14} className="inline mr-1" /> 开始新游戏
+                </button>
+                <button
+                  type="button"
+                  disabled={!isHost}
+                  onClick={() => setGameSetupMode('load_save')}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    gameSetupMode === 'load_save'
+                      ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                      : 'border-zinc-700 bg-zinc-900 text-zinc-300'
+                  } ${!isHost ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  <Archive size={14} className="inline mr-1" /> 加载存档
+                </button>
+              </div>
+              {!isHost && <div className="text-[11px] text-zinc-500">仅房主可切换模式</div>}
+            </div>
+
             {isHost ? (
               <button
                 onClick={handleStartGame}
                 className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-zinc-950 rounded-xl font-bold text-lg shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!allFunctionsCovered}
+                disabled={!allFunctionsCovered || hasUnassignedLoadModePlayers}
               >
                 <Play size={20} /> 开始游戏
               </button>
             ) : (
               <div className="w-full py-4 bg-zinc-800 text-zinc-400 rounded-xl font-bold text-center border border-zinc-700 flex-shrink-0">等待房主开始...</div>
             )}
+
+            {hasUnassignedLoadModePlayers && (
+              <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                加载存档模式下，仍有玩家未选择角色或未进入创建角色，暂不可开始。
+              </div>
+            )}
           </section>
 
           <section className="lg:col-span-5 border border-zinc-800 rounded-xl bg-zinc-950/50 p-4 min-h-0 overflow-y-auto custom-scrollbar">
             <div className="flex items-center gap-2 text-zinc-300 font-semibold mb-3">
-              <ScrollText size={16} /> 角色创建（大厅内公开可见）
+              <ScrollText size={16} /> {isLoadMode ? '角色选择 / 创建' : '角色创建（大厅内公开可见）'}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-zinc-500">模板</label>
-                <select
-                  className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
-                  value={selfPlayer?.selectedRoleTemplateId || ''}
-                  onChange={(e) => e.target.value && selectRoleTemplate(e.target.value)}
-                >
-                  {roleTemplates.map((role: any) => (
-                    <option key={role.id} value={role.id}>{role.name}</option>
-                  ))}
-                </select>
+            {isLoadMode && (
+              <div className="mb-4 space-y-3">
+                <div className="text-xs text-zinc-400">加载存档模式：先选择一个未被占用的角色，或切换到创建角色。</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {savedCharacters.map((saved: any) => {
+                    const claimedPlayer = players.find((p: any) => p.id === saved.claimedBy);
+                    const isMine = selfSelectedSavedCharacterId === saved.id;
+                    const disabled = Boolean(saved.claimedBy && !isMine);
+                    return (
+                      <button
+                        key={saved.id}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => claimSavedCharacter(saved.id)}
+                        className={`text-left px-3 py-2 rounded-lg border transition-colors ${
+                          isMine
+                            ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300'
+                            : disabled
+                              ? 'border-zinc-800 bg-zinc-900/50 text-zinc-500 cursor-not-allowed'
+                              : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-amber-500/40'
+                        }`}
+                      >
+                        <div className="text-sm font-semibold">{saved.name}</div>
+                        <div className="text-[11px] text-zinc-500">
+                          {disabled ? `已被 ${claimedPlayer?.name || '其他玩家'} 选择` : isMine ? '你已选择该角色' : '点击选择该角色'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCustomCharacterMode(true)}
+                    className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                      selfCanCreateCustomCharacter
+                        ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                        : 'border-zinc-700 bg-zinc-900 text-zinc-300'
+                    }`}
+                  >
+                    <UserPlus size={14} className="inline mr-1" /> 创建角色
+                  </button>
+                </div>
               </div>
+            )}
 
-              <div>
-                <label className="text-xs text-zinc-500">角色名字（玩家输入）</label>
-                <input
-                  className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
-                  value={characterNameInput}
-                  onCompositionStart={() => setIsComposingCharacterName(true)}
-                  onCompositionEnd={(e) => {
-                    const value = e.currentTarget.value;
-                    setIsComposingCharacterName(false);
-                    setCharacterNameInput(value);
-                    updateProfile({ characterName: value });
-                  }}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setCharacterNameInput(value);
-                    if (!isComposingCharacterName) {
+            {isLoadMode && !selfCanCreateCustomCharacter && (
+              <div className="mb-3 text-xs text-zinc-400 bg-zinc-900/70 border border-zinc-700 rounded-lg px-3 py-2">
+                你当前使用的是“存档角色”，如需新建角色请先点击上方“创建角色”。
+              </div>
+            )}
+
+            <fieldset disabled={!canEditCustomCharacter} className={!canEditCustomCharacter ? 'opacity-60' : ''}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-zinc-500">模板</label>
+                  <select
+                    className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+                    value={selfPlayer?.selectedRoleTemplateId || ''}
+                    onChange={(e) => e.target.value && selectRoleTemplate(e.target.value)}
+                  >
+                    {roleTemplates.map((role: any) => (
+                      <option key={role.id} value={role.id}>{role.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500">角色名字（玩家输入）</label>
+                  <input
+                    className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+                    value={characterNameInput}
+                    onCompositionStart={() => setIsComposingCharacterName(true)}
+                    onCompositionEnd={(e) => {
+                      const value = e.currentTarget.value;
+                      setIsComposingCharacterName(false);
+                      setCharacterNameInput(value);
                       updateProfile({ characterName: value });
-                    }
-                  }}
-                  onBlur={() => {
-                    if ((selfProfile?.characterName || '') !== characterNameInput) {
-                      updateProfile({ characterName: characterNameInput });
-                    }
-                  }}
-                  maxLength={30}
-                  placeholder="输入你的角色名"
-                />
+                    }}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCharacterNameInput(value);
+                      if (!isComposingCharacterName) {
+                        updateProfile({ characterName: value });
+                      }
+                    }}
+                    onBlur={() => {
+                      if ((selfProfile?.characterName || '') !== characterNameInput) {
+                        updateProfile({ characterName: characterNameInput });
+                      }
+                    }}
+                    maxLength={30}
+                    placeholder="输入你的角色名"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500">职业</label>
+                  <select
+                    className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+                    value={selfProfile?.selectedClassId || ''}
+                    onChange={(e) => updateProfile({ selectedClassId: e.target.value || null })}
+                  >
+                    {(selectedTemplate?.classOptions || []).map((opt: any) => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500">性别</label>
+                  <select
+                    className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+                    value={selfProfile?.selectedGenderId || ''}
+                    onChange={(e) => updateProfile({ selectedGenderId: e.target.value || null })}
+                  >
+                    {(selectedTemplate?.genderOptions || []).map((opt: any) => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500">种族</label>
+                  <select
+                    className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+                    value={selfProfile?.selectedRaceId || ''}
+                    onChange={(e) => updateProfile({ selectedRaceId: e.target.value || null })}
+                  >
+                    {(selectedTemplate?.raceOptions || []).map((opt: any) => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500">背景</label>
+                  <select
+                    className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
+                    value={selfProfile?.selectedBackgroundId || ''}
+                    onChange={(e) => updateProfile({ selectedBackgroundId: e.target.value || null })}
+                  >
+                    {(selectedTemplate?.backgroundOptions || []).map((opt: any) => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="text-xs text-zinc-500">职业</label>
-                <select
-                  className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
-                  value={selfProfile?.selectedClassId || ''}
-                  onChange={(e) => updateProfile({ selectedClassId: e.target.value || null })}
-                >
-                  {(selectedTemplate?.classOptions || []).map((opt: any) => (
-                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+              <div className="mt-4">
+                <div className="text-xs text-zinc-500 mb-1">
+                  自由分配点数｜总可分配：{totalAvailablePoints}，已使用：{usedPoints}，可用：{remainingPoints}
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {ATTRIBUTE_KEYS.map((key) => (
+                    <label key={key} className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-400">
+                      {key}
+                      <input
+                        type="number"
+                        min={0}
+                        max={Math.min(10, (selfProfile?.allocatedPoints?.[key] || 0) + remainingPoints)}
+                        value={selfProfile?.allocatedPoints?.[key] || 0}
+                        onChange={(e) => updateAttributePoint(key, Number(e.target.value || 0))}
+                        className="mt-1 w-full bg-zinc-800 rounded px-2 py-1 text-zinc-200"
+                      />
+                    </label>
                   ))}
-                </select>
+                </div>
               </div>
 
-              <div>
-                <label className="text-xs text-zinc-500">性别</label>
-                <select
-                  className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
-                  value={selfProfile?.selectedGenderId || ''}
-                  onChange={(e) => updateProfile({ selectedGenderId: e.target.value || null })}
-                >
-                  {(selectedTemplate?.genderOptions || []).map((opt: any) => (
-                    <option key={opt.id} value={opt.id}>{opt.name}</option>
-                  ))}
-                </select>
+              <div className="mt-4">
+                <div className="text-xs text-zinc-500 mb-1">最终属性（基础 + 分配 + 职业/性别/种族/背景加成）</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {ATTRIBUTE_KEYS.map((key) => {
+                    const base = selectedTemplate?.baseAttributes?.[key] || 0;
+                    const allocated = selfProfile?.allocatedPoints?.[key] || 0;
+                    const bonus = optionBonusByAttribute[key] || 0;
+                    const total = finalAttributes[key] || 0;
+                    return (
+                      <div key={`final-${key}`} className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-300">
+                        <div className="font-semibold text-zinc-200">{key}: {total}</div>
+                        <div className="text-[11px] text-zinc-500">{base} + {allocated} + {bonus}</div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div>
-                <label className="text-xs text-zinc-500">种族</label>
-                <select
-                  className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
-                  value={selfProfile?.selectedRaceId || ''}
-                  onChange={(e) => updateProfile({ selectedRaceId: e.target.value || null })}
-                >
-                  {(selectedTemplate?.raceOptions || []).map((opt: any) => (
-                    <option key={opt.id} value={opt.id}>{opt.name}</option>
-                  ))}
-                </select>
+              <div className="mt-4">
+                <div className="text-xs text-zinc-500 mb-1">开局物资（最多 {selectedTemplate?.maxStarterItems || 0} 项）</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {(selectedTemplate?.starterItemOptions || []).map((item: any) => {
+                    const checked = (selfProfile?.selectedStarterItemIds || []).includes(item.id);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => toggleStarterItem(item.id)}
+                        className={`text-left px-3 py-2 rounded border ${checked ? 'border-amber-500/60 bg-amber-500/10 text-amber-300' : 'border-zinc-700 bg-zinc-900 text-zinc-300'}`}
+                      >
+                        <div className="text-sm font-semibold">{item.name}</div>
+                        <div className="text-[11px] text-zinc-500">{item.description}</div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-
-              <div>
-                <label className="text-xs text-zinc-500">背景</label>
-                <select
-                  className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm"
-                  value={selfProfile?.selectedBackgroundId || ''}
-                  onChange={(e) => updateProfile({ selectedBackgroundId: e.target.value || null })}
-                >
-                  {(selectedTemplate?.backgroundOptions || []).map((opt: any) => (
-                    <option key={opt.id} value={opt.id}>{opt.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <div className="text-xs text-zinc-500 mb-1">
-                自由分配点数｜总可分配：{totalAvailablePoints}，已使用：{usedPoints}，可用：{remainingPoints}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {ATTRIBUTE_KEYS.map((key) => (
-                  <label key={key} className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-400">
-                    {key}
-                    <input
-                      type="number"
-                      min={0}
-                      max={Math.min(10, (selfProfile?.allocatedPoints?.[key] || 0) + remainingPoints)}
-                      value={selfProfile?.allocatedPoints?.[key] || 0}
-                      onChange={(e) => updateAttributePoint(key, Number(e.target.value || 0))}
-                      className="mt-1 w-full bg-zinc-800 rounded px-2 py-1 text-zinc-200"
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <div className="text-xs text-zinc-500 mb-1">最终属性（基础 + 分配 + 职业/性别/种族/背景加成）</div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {ATTRIBUTE_KEYS.map((key) => {
-                  const base = selectedTemplate?.baseAttributes?.[key] || 0;
-                  const allocated = selfProfile?.allocatedPoints?.[key] || 0;
-                  const bonus = optionBonusByAttribute[key] || 0;
-                  const total = finalAttributes[key] || 0;
-                  return (
-                    <div key={`final-${key}`} className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-300">
-                      <div className="font-semibold text-zinc-200">{key}: {total}</div>
-                      <div className="text-[11px] text-zinc-500">{base} + {allocated} + {bonus}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <div className="text-xs text-zinc-500 mb-1">开局物资（最多 {selectedTemplate?.maxStarterItems || 0} 项）</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {(selectedTemplate?.starterItemOptions || []).map((item: any) => {
-                  const checked = (selfProfile?.selectedStarterItemIds || []).includes(item.id);
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => toggleStarterItem(item.id)}
-                      className={`text-left px-3 py-2 rounded border ${checked ? 'border-amber-500/60 bg-amber-500/10 text-amber-300' : 'border-zinc-700 bg-zinc-900 text-zinc-300'}`}
-                    >
-                      <div className="text-sm font-semibold">{item.name}</div>
-                      <div className="text-[11px] text-zinc-500">{item.description}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            </fieldset>
           </section>
 
           <aside className="lg:col-span-3 flex flex-col h-full border border-zinc-800 rounded-xl overflow-hidden bg-black">

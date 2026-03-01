@@ -104,6 +104,16 @@ export default function CreateRoom({ playerName, setPlayerName, onBack, onCreate
                 />
               </div>
               <div className="space-y-2">
+                <label className="text-sm text-zinc-400">房间密码（可选）</label>
+                <input
+                  type="password"
+                  value={roomPassword}
+                  onChange={(e) => setRoomPassword(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-zinc-200 focus:border-amber-500 outline-none transition-colors"
+                  placeholder="留空为公开房间"
+                />
+              </div>
+              <div className="space-y-2">
                 <label className="text-sm text-zinc-400">房间介绍 / 留言</label>
                 <textarea
                   value={roomIntro}

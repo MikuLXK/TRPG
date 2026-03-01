@@ -133,7 +133,7 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
     });
   };
 
-  const handleJoinRoom = (roomId: string) => {
+  const handleJoinRoom = (roomId: string, password?: string) => {
     if (!playerName.trim()) {
       showToast("请输入玩家昵称", 'error');
       return;
@@ -142,7 +142,7 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
       showToast("请输入或选择一个房间", 'error');
       return;
     }
-    socketService.joinRoom(roomId, playerName, accountUsername);
+    socketService.joinRoom(roomId, playerName, accountUsername, password);
   };
 
   const renderView = () => {

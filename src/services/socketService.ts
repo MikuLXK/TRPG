@@ -29,12 +29,24 @@ class SocketService {
     this.socket?.emit("create_room", data);
   }
 
-  joinRoom(roomId: string, playerName: string, accountUsername?: string) {
-    this.socket?.emit("join_room", { roomId, playerName, accountUsername });
+  joinRoom(roomId: string, playerName: string, accountUsername?: string, password?: string) {
+    this.socket?.emit("join_room", { roomId, playerName, accountUsername, password });
   }
 
   getRooms(data?: { accountUsername?: string; playerName?: string }) {
     this.socket?.emit("get_rooms", data);
+  }
+
+  setGameSetupMode(roomId: string, mode: "new_game" | "load_save") {
+    this.socket?.emit("set_game_setup_mode", { roomId, mode });
+  }
+
+  claimSavedCharacter(roomId: string, characterId: string) {
+    this.socket?.emit("claim_saved_character", { roomId, characterId });
+  }
+
+  setCustomCharacterMode(roomId: string, enabled: boolean) {
+    this.socket?.emit("set_custom_character_mode", { roomId, enabled });
   }
 
   startGame(roomId: string) {

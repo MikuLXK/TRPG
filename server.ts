@@ -45,7 +45,11 @@ const io = new Server(httpServer, {
   }
 });
 
-const PORT = 3000;
+const PORT = (() => {
+  const raw = Number(process.env.PORT || "3000");
+  if (!Number.isFinite(raw) || raw <= 0) return 3000;
+  return Math.floor(raw);
+})();
 const EMPTY_ROOM_TIMEOUT_MS = 2 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 30 * 1000;
 
@@ -127,6 +131,7 @@ interface Room {
   intro?: string;
   players: Player[];
   status: RoomStatus;
+  streamingMode: "off" | "provider";
   hasStarted: boolean;
   gameSetupMode: "new_game" | "load_save";
   savedCharacters: SavedCharacter[];
@@ -968,10 +973,24 @@ registerPlayerAssetRoutes({
   persistAdminState
 });
 
-httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+const startServer = (port: number, retries = 20) => {
+  httpServer.once("error", (error: any) => {
+    if (error?.code === "EADDRINUSE" && retries > 0) {
+      const nextPort = port + 1;
+      console.warn(`Port ${port} is in use, retrying on ${nextPort}...`);
+      startServer(nextPort, retries - 1);
+      return;
+    }
+    console.error("Server startup failed:", error);
+    process.exit(1);
+  });
 
+  httpServer.listen(port, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${port}`);
+  });
+};
+
+startServer(PORT);
 ViteExpress.bind(app, httpServer);
 
 

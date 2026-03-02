@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { 游戏日志 } from '../../types/GameData';
-import { Send } from 'lucide-react';
+import { Send, Waves, Ban } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface GameLogPanelProps {
@@ -11,6 +11,17 @@ interface GameLogPanelProps {
   totalPlayers?: number;
   isStreaming?: boolean;
   streamPreview?: string;
+  roomStatus?: string;
+  currentRound?: number;
+  aiStepText?: string;
+  playerInputStates?: Array<{
+    id: string;
+    name: string;
+    isReady: boolean;
+    action: string;
+  }>;
+  streamingMode?: 'off' | 'provider';
+  onToggleStreamingMode?: () => void;
 }
 
 export default function GameLogPanel({
@@ -21,6 +32,12 @@ export default function GameLogPanel({
   totalPlayers = 0,
   isStreaming = false,
   streamPreview = '',
+  roomStatus = '等待中',
+  currentRound = 1,
+  aiStepText = '等待玩家输入',
+  playerInputStates = [],
+  streamingMode = 'provider',
+  onToggleStreamingMode,
 }: GameLogPanelProps) {
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -38,7 +55,7 @@ export default function GameLogPanel({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -54,6 +71,29 @@ export default function GameLogPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar z-10" ref={scrollRef}>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 text-xs text-zinc-300 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-zinc-500 mr-2">当前回合</span>
+              <span className="text-amber-400 font-semibold">第 {currentRound} 回合</span>
+            </div>
+            <div className="text-zinc-400">状态：{roomStatus}</div>
+          </div>
+          <div className="text-cyan-300">{aiStepText}</div>
+          <div className="flex flex-wrap gap-2">
+            {playerInputStates.map((player) => {
+              const actionPreview = player.action ? (player.action.length > 20 ? `${player.action.slice(0, 20)}...` : player.action) : '';
+              return (
+                <div key={player.id} className={`px-2 py-1 rounded-md border ${player.isReady ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>
+                  <span>{player.name}</span>
+                  <span className="ml-1">{player.isReady ? '已提交' : '未提交'}</span>
+                  {actionPreview && <span className="ml-1 text-zinc-500">({actionPreview})</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <AnimatePresence>
           {日志列表.map((log) => (
             <motion.div
@@ -112,6 +152,19 @@ export default function GameLogPanel({
         <div className={`relative flex items-center gap-2 bg-zinc-950 p-1.5 rounded-xl border transition-colors shadow-inner h-12
           ${isReady ? 'border-zinc-800 opacity-50 cursor-not-allowed' : 'border-zinc-700 focus-within:border-amber-500/50'}
         `}>
+          <button
+            onClick={onToggleStreamingMode}
+            type="button"
+            title={streamingMode === 'provider' ? '流式已开启（跟随API提供者）' : '流式已关闭'}
+            className={`h-full aspect-square flex items-center justify-center rounded-lg transition-colors shadow-lg active:scale-95
+              ${streamingMode === 'provider'
+                ? 'bg-cyan-900/60 text-cyan-200 hover:bg-cyan-800/70'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}
+            `}
+          >
+            {streamingMode === 'provider' ? <Waves size={16} strokeWidth={2.4} /> : <Ban size={16} strokeWidth={2.4} />}
+          </button>
+
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}

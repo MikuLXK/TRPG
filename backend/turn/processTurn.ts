@@ -36,23 +36,39 @@ export const createTurnProcessor = (deps: {
   io: any;
   getActivePlayers: (room: any) => Array<{ id: string; name: string; isReady: boolean; action: string }>;
   runActionCollector: (room: any) => Promise<GroupedActionsLike>;
-  runMainStory: (room: any, groupedActions: GroupedActionsLike) => Promise<StoryPayloadLike>;
+  runMainStory: (
+    room: any,
+    groupedActions: GroupedActionsLike,
+    options?: { stream?: boolean; onStreamChunk?: (chunk: string) => void }
+  ) => Promise<StoryPayloadLike>;
   runStateProcessor: (room: any, storyPayload: StoryPayloadLike, groupedActions: GroupedActionsLike) => Promise<unknown>;
   applyStateChanges: (room: any, changesInput: unknown) => void;
 }) => {
   return async (roomId: string) => {
     const room = deps.rooms[roomId];
     if (!room) return;
+    const streamMode = room.streamingMode === "provider" ? "provider" : "off";
+    const useProviderStream = streamMode === "provider";
 
     try {
-      deps.io.to(roomId).emit("story_stream_start");
+      if (useProviderStream) {
+        deps.io.to(roomId).emit("story_stream_start");
+      }
       const groupedActions = await deps.runActionCollector(room);
       room.status = "story_generation";
       deps.io.to(roomId).emit("room_updated", room);
       deps.io.emit("rooms_list_updated");
 
-      const storyPayload = await deps.runMainStory(room, groupedActions);
-      deps.io.to(roomId).emit("story_stream_end");
+      const storyPayload = await deps.runMainStory(room, groupedActions, {
+        stream: useProviderStream,
+        onStreamChunk: (chunk) => {
+          if (!useProviderStream || !chunk) return;
+          deps.io.to(roomId).emit("story_stream_chunk", { chunk });
+        }
+      });
+      if (useProviderStream) {
+        deps.io.to(roomId).emit("story_stream_end");
+      }
       room.status = "settlement";
       deps.io.to(roomId).emit("room_updated", room);
       deps.io.emit("rooms_list_updated");
@@ -135,11 +151,14 @@ export const createTurnProcessor = (deps: {
       });
 
       deps.io.to(roomId).emit("turn_progress", { readyCount: 0, total: deps.getActivePlayers(room).length });
+      deps.io.to(roomId).emit("room_updated", room);
       deps.io.to(roomId).emit("round_complete", { room, story: globalSummary || "回合处理完成。" });
       deps.io.emit("rooms_list_updated");
     } catch (error) {
       console.error("Error processing turn:", error);
-      deps.io.to(roomId).emit("story_stream_end");
+      if (useProviderStream) {
+        deps.io.to(roomId).emit("story_stream_end");
+      }
       deps.io.to(roomId).emit("error", `AI 处理回合失败: ${String((error as Error)?.message ?? error)}`);
       room.status = "waiting";
       room.players.forEach((p: any) => {
@@ -151,4 +170,3 @@ export const createTurnProcessor = (deps: {
     }
   };
 };
-

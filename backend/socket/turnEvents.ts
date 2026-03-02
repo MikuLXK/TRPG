@@ -5,6 +5,15 @@ export const registerTurnEvents = (socket: any, deps: {
   processTurn: (roomId: string) => void;
   removePlayerFromRoom: (socketId: string) => void;
 }) => {
+  socket.on("set_room_streaming_mode", ({ roomId, mode }: { roomId: string; mode: "off" | "provider" }) => {
+    const room = deps.rooms[roomId];
+    if (!room) return;
+    const player = room.players.find((p: any) => p.id === socket.id);
+    if (!player) return;
+    room.streamingMode = mode === "provider" ? "provider" : "off";
+    deps.io.to(roomId).emit("room_updated", room);
+  });
+
   socket.on("chat_message", ({ roomId, message }: { roomId: string; message: string }) => {
     const room = deps.rooms[roomId];
     if (!room) return;
@@ -50,4 +59,3 @@ export const registerTurnEvents = (socket: any, deps: {
     deps.removePlayerFromRoom(socket.id);
   });
 };
-

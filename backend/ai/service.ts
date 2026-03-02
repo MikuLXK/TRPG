@@ -102,7 +102,11 @@ export const runActionCollector = async (room: RoomLike): Promise<ActionCollecto
   return normalizeActionCollectorPayload(room, parsed, collectorInput.players);
 };
 
-export const runMainStory = async (room: RoomLike, groupedActions: ActionCollectorPayload): Promise<MainStoryPayload> => {
+export const runMainStory = async (
+  room: RoomLike,
+  groupedActions: ActionCollectorPayload,
+  options?: { stream?: boolean; onStreamChunk?: (chunk: string) => void }
+): Promise<MainStoryPayload> => {
   const providerPlayer = pickProviderByRoundRobin(room, "mainStory");
   const connection = getEffectiveConnection(providerPlayer, "mainStory");
   const [userTemplate, modelTemplate, systemPromptBase] = await Promise.all([
@@ -131,7 +135,9 @@ export const runMainStory = async (room: RoomLike, groupedActions: ActionCollect
     temperature: providerPlayer.aiSettings.mainStory.prompt.temperature,
     systemPrompt: promptEnvelope.systemPrompt,
     userPrompt: promptEnvelope.userPrompt,
-    modelPrompt: promptEnvelope.modelPrompt
+    modelPrompt: promptEnvelope.modelPrompt,
+    stream: options?.stream,
+    onStreamChunk: options?.onStreamChunk
   });
   const parsed = safeJsonParse<MainStoryPayload>(output);
   return normalizeMainStoryPayload(room, groupedActions, parsed);

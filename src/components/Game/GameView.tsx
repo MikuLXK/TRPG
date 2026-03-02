@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Header from '../Layout/Header';
 import Footer from '../Layout/Footer';
 import CharacterPanel from '../Panels/CharacterPanel';
@@ -16,6 +16,13 @@ interface GameViewProps {
   accountUsername?: string;
 }
 
+interface 玩家输入状态 {
+  id: string;
+  name: string;
+  isReady: boolean;
+  action: string;
+}
+
 export default function GameView({ roomState, onExit, roomId, accountUsername = '' }: GameViewProps) {
   const [游戏数据, set游戏数据] = useState<游戏状态>(初始游戏状态);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -24,11 +31,46 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
   const [totalPlayers, setTotalPlayers] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamPreview, setStreamPreview] = useState('');
-  const [receivedPersonalStory, setReceivedPersonalStory] = useState(false);
+  const [roomStatus, setRoomStatus] = useState<string>(roomState?.status || 'waiting');
+  const [currentRound, setCurrentRound] = useState<number>(roomState?.currentRound || 1);
+  const [streamingMode, setStreamingMode] = useState<'off' | 'provider'>(roomState?.streamingMode === 'off' ? 'off' : 'provider');
+  const [playerInputStates, setPlayerInputStates] = useState<玩家输入状态[]>([]);
 
   const roomPlayers = roomState?.players || [];
   const roleTemplates: ScriptRoleTemplate[] = roomState?.script?.roleTemplates || [];
   const selfId = socketService.socket?.id;
+
+  const resolveSelfPlayer = (players: any[]) => {
+    const socket = socketService.socket;
+    const bySocketId = socket?.id ? players.find((p: any) => p.id === socket.id) : null;
+    if (bySocketId) return bySocketId;
+    if (accountUsername) {
+      const byAccount = players.find((p: any) => p.accountUsername === accountUsername);
+      if (byAccount) return byAccount;
+    }
+    return null;
+  };
+
+  const buildPlayerInputStates = (players: any[]): 玩家输入状态[] => {
+    return players.map((p: any) => ({
+      id: String(p.id || ''),
+      name: String(p.name || '未命名玩家'),
+      isReady: Boolean(p.isReady),
+      action: String(p.action || '').trim(),
+    }));
+  };
+
+  useEffect(() => {
+    const players = roomState?.players || [];
+    const myPlayer = resolveSelfPlayer(players);
+    setIsReady(Boolean(myPlayer?.isReady));
+    setTotalPlayers(players.length || 0);
+    setReadyCount(players.filter((p: any) => p.isReady).length);
+    setRoomStatus(roomState?.status || 'waiting');
+    setCurrentRound(roomState?.currentRound || 1);
+    setStreamingMode(roomState?.streamingMode === 'off' ? 'off' : 'provider');
+    setPlayerInputStates(buildPlayerInputStates(players));
+  }, [roomState, accountUsername]);
 
   const currentPlayerInfo = useMemo<角色信息>(() => {
     const selfPlayer = roomPlayers.find((p: any) => p.id === selfId);
@@ -90,40 +132,29 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     const socket = socketService.socket;
     if (!socket) return;
 
-    const myPlayer = roomState?.players?.find((p: any) => p.id === socket.id);
-    if (myPlayer) {
-      setIsReady(myPlayer.isReady);
-    }
-    setTotalPlayers(roomState?.players?.length || 0);
-
-    const onRoundComplete = ({ story }: { room: any; story: string }) => {
-      if (story && !receivedPersonalStory) {
-        const newLog: 游戏日志 = {
-          id: Date.now().toString(),
-          发送者: '系统',
-          内容: story,
-          类型: '旁白',
-          时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-
-        set游戏数据((prev) => ({
-          ...prev,
-          日志列表: [...prev.日志列表, newLog]
-        }));
-      }
-
-      setReceivedPersonalStory(false);
+    const onRoundComplete = ({ room }: { room: any; story: string }) => {
       setIsReady(false);
       setReadyCount(0);
       setIsStreaming(false);
       setStreamPreview('');
+      if (room) {
+        setRoomStatus(room.status || 'waiting');
+        setCurrentRound(room.currentRound || 1);
+        setStreamingMode(room.streamingMode === 'off' ? 'off' : 'provider');
+        setPlayerInputStates(buildPlayerInputStates(room.players || []));
+      }
     };
 
     const onRoomUpdated = (updatedRoom: any) => {
-      const me = updatedRoom.players.find((p: any) => p.id === socket.id);
-      if (me) setIsReady(me.isReady);
-      setTotalPlayers(updatedRoom.players.length);
-      setReadyCount(updatedRoom.players.filter((p: any) => p.isReady).length);
+      const nextPlayers = updatedRoom?.players || [];
+      const me = resolveSelfPlayer(nextPlayers);
+      setIsReady(Boolean(me?.isReady));
+      setTotalPlayers(nextPlayers.length);
+      setReadyCount(nextPlayers.filter((p: any) => p.isReady).length);
+      setRoomStatus(updatedRoom?.status || 'waiting');
+      setCurrentRound(updatedRoom?.currentRound || 1);
+      setStreamingMode(updatedRoom?.streamingMode === 'off' ? 'off' : 'provider');
+      setPlayerInputStates(buildPlayerInputStates(nextPlayers));
     };
 
     const onNewLog = (log: 游戏日志) => {
@@ -136,6 +167,9 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     const onTurnProgress = ({ readyCount: rc, total }: { readyCount: number; total: number }) => {
       setReadyCount(rc);
       setTotalPlayers(total);
+      if (rc === 0) {
+        setIsReady(false);
+      }
     };
 
     const onStoryStreamStart = () => {
@@ -165,7 +199,6 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
         ...prev,
         日志列表: [...prev.日志列表, newLog]
       }));
-      setReceivedPersonalStory(true);
       setIsStreaming(false);
       setStreamPreview('');
     };
@@ -189,7 +222,47 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       socket.off('story_stream_end', onStoryStreamEnd);
       socket.off('player_story', onPlayerStory);
     };
-  }, [roomState, receivedPersonalStory]);
+  }, [accountUsername]);
+
+  const aiStepText = useMemo(() => {
+    const streamText = streamingMode === 'provider' ? '流式：跟随API提供者' : '流式：关闭';
+    switch (roomStatus) {
+      case 'processing':
+        return `AI步骤 1/3：收集并分组玩家行动（${streamText}）`;
+      case 'story_generation':
+        return `AI步骤 2/3：生成主剧情并分发可见内容（${streamText}）`;
+      case 'settlement':
+        return `AI步骤 3/3：结算状态变化（${streamText}）`;
+      case 'playing':
+      case 'waiting':
+      default:
+        return `等待玩家输入（第 ${currentRound} 回合，${streamText}）`;
+    }
+  }, [roomStatus, currentRound, streamingMode]);
+
+  const roomStatusZh = useMemo(() => {
+    switch (roomStatus) {
+      case 'waiting':
+        return '等待中';
+      case 'playing':
+        return '游戏中';
+      case 'processing':
+        return '处理中';
+      case 'story_generation':
+        return '剧情生成中';
+      case 'settlement':
+        return '结算中';
+      default:
+        return '未知';
+    }
+  }, [roomStatus]);
+
+  const handleToggleStreamingMode = () => {
+    if (!roomState?.id) return;
+    const nextMode: 'off' | 'provider' = streamingMode === 'provider' ? 'off' : 'provider';
+    setStreamingMode(nextMode);
+    socketService.setRoomStreamingMode(roomState.id, nextMode);
+  };
 
   const handleSendMessage = (text: string) => {
     if (isReady) return;
@@ -255,6 +328,12 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
                 totalPlayers={totalPlayers}
                 isStreaming={isStreaming}
                 streamPreview={streamPreview}
+                roomStatus={roomStatusZh}
+                currentRound={currentRound}
+                aiStepText={aiStepText}
+                playerInputStates={playerInputStates}
+                streamingMode={streamingMode}
+                onToggleStreamingMode={handleToggleStreamingMode}
               />
             </div>
           </div>

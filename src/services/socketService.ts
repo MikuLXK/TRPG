@@ -7,7 +7,7 @@ class SocketService {
 
   connect() {
     if (this.socket) return;
-    this.socket = io("ws://localhost:3000", {
+    this.socket = io({
       transports: ["websocket"],
     });
 
@@ -67,6 +67,10 @@ class SocketService {
 
   submitAction(roomId: string, action: string) {
     this.socket?.emit("submit_action", { roomId, action });
+  }
+
+  setRoomStreamingMode(roomId: string, mode: "off" | "provider") {
+    this.socket?.emit("set_room_streaming_mode", { roomId, mode });
   }
 
   togglePlayerAIFunction(roomId: string, functionType: AIFunctionType) {

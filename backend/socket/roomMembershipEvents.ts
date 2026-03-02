@@ -73,6 +73,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
         statusEffects: []
       }],
       status: "waiting",
+      streamingMode: "provider",
       hasStarted: false,
       gameSetupMode: "new_game",
       savedCharacters: [],
@@ -191,4 +192,3 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
     console.log(`${playerName} joined room ${roomId}`);
   });
 };
-

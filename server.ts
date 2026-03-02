@@ -85,6 +85,9 @@ interface Player {
   aiSettings: PlayerAISettings;
   selectedRoleTemplateId: string | null;
   characterProfile: PlayerCharacterProfile;
+  currentHP: number;
+  currentMP: number;
+  statusEffects: string[];
 }
 
 interface SharedAssetEnvelope<T = unknown> {
@@ -563,6 +566,31 @@ const createDefaultCharacterProfile = (template: ScriptRoleTemplate): PlayerChar
   calculatedAttributes: { ...template.baseAttributes }
 });
 
+const getMaxHPByAttributes = (attrs: CharacterAttributeBlock) => Math.max(1, 60 + (attrs.体质 ?? 0) * 4);
+const getMaxMPByAttributes = (attrs: CharacterAttributeBlock) => Math.max(0, 20 + (attrs.智力 ?? 0) * 4);
+
+const syncPlayerCombatStats = (player: Player) => {
+  const attrs = player.characterProfile?.calculatedAttributes || createEmptyAttributes();
+  const maxHP = getMaxHPByAttributes(attrs);
+  const maxMP = getMaxMPByAttributes(attrs);
+
+  if (!Number.isFinite(player.currentHP) || player.currentHP <= 0) {
+    player.currentHP = maxHP;
+  } else {
+    player.currentHP = Math.max(0, Math.min(maxHP, Math.floor(player.currentHP)));
+  }
+
+  if (!Number.isFinite(player.currentMP) || player.currentMP < 0) {
+    player.currentMP = maxMP;
+  } else {
+    player.currentMP = Math.max(0, Math.min(maxMP, Math.floor(player.currentMP)));
+  }
+
+  if (!Array.isArray(player.statusEffects)) {
+    player.statusEffects = [];
+  }
+};
+
 const clampInt = (value: unknown, min: number, max: number) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return min;
@@ -672,6 +700,7 @@ const applyCharacterProfilePatch = (room: Room, player: Player, patch: Partial<P
 
   player.characterProfile = profile;
   player.role = [classOpt?.name, raceOpt?.name].filter(Boolean).join("/") || "未分配";
+  syncPlayerCombatStats(player);
 };
 
 const getPromptPath = (functionType: AIFunctionType, role: PromptRole) => {
@@ -926,6 +955,7 @@ const runActionCollector = async (room: Room) => {
   const actions = getActivePlayers(room).map((p) => ({
     playerId: p.id,
     playerName: p.name,
+    location: p.location,
     action: p.action
   }));
 
@@ -990,7 +1020,10 @@ const runStateProcessor = async (room: Room, storyText: string) => {
   const currentState = room.players.map((p) => ({
     playerId: p.id,
     playerName: p.name,
-    location: p.location
+    location: p.location,
+    currentHP: p.currentHP,
+    currentMP: p.currentMP,
+    statusEffects: p.statusEffects
   }));
 
   const userPrompt = fillTemplate(userTemplate, {
@@ -1012,7 +1045,101 @@ const runStateProcessor = async (room: Room, storyText: string) => {
   return safeJsonParse<{ changes?: any[] }>(output) ?? { changes: [] };
 };
 
+interface MainStorySegment {
+  groupId: string;
+  visibleToPlayerIds: string[];
+  title: string;
+  content: string;
+}
+
+interface MainStoryHint {
+  playerId: string;
+  hint: string;
+}
+
+interface MainStoryPayload {
+  globalSummary?: string;
+  segments?: MainStorySegment[];
+  nextHints?: MainStoryHint[];
+}
+
 const getActivePlayers = (room: Room) => room.players.filter((p) => p.isOnline !== false);
+
+const buildStateStoryText = (payload: MainStoryPayload) => {
+  const parts: string[] = [];
+  if (typeof payload.globalSummary === "string" && payload.globalSummary.trim()) {
+    parts.push(payload.globalSummary.trim());
+  }
+
+  for (const seg of payload.segments || []) {
+    const title = (seg.title || "").trim();
+    const content = (seg.content || "").trim();
+    if (title || content) {
+      parts.push([title, content].filter(Boolean).join("\n"));
+    }
+  }
+
+  return parts.join("\n\n");
+};
+
+const applyStateChanges = (room: Room, changesInput: unknown) => {
+  const changes = Array.isArray((changesInput as any)?.changes) ? (changesInput as any).changes : [];
+
+  for (const change of changes) {
+    const playerId = typeof change?.playerId === "string" ? change.playerId : "";
+    if (!playerId) continue;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) continue;
+
+    const fields = (change?.fields && typeof change.fields === "object") ? change.fields as Record<string, unknown> : {};
+
+    if (typeof fields.位置 === "string" && fields.位置.trim()) {
+      player.location = fields.位置.trim();
+    }
+
+    const hpDelta = Number(fields.生命值 ?? fields.hpDelta ?? 0);
+    if (Number.isFinite(hpDelta) && hpDelta !== 0) {
+      const maxHP = getMaxHPByAttributes(player.characterProfile?.calculatedAttributes || createEmptyAttributes());
+      player.currentHP = Math.max(0, Math.min(maxHP, Math.floor(player.currentHP + hpDelta)));
+    }
+
+    const mpDelta = Number(fields.法力值 ?? fields.mpDelta ?? 0);
+    if (Number.isFinite(mpDelta) && mpDelta !== 0) {
+      const maxMP = getMaxMPByAttributes(player.characterProfile?.calculatedAttributes || createEmptyAttributes());
+      player.currentMP = Math.max(0, Math.min(maxMP, Math.floor(player.currentMP + mpDelta)));
+    }
+
+    const nextHP = Number(fields.当前生命值);
+    if (Number.isFinite(nextHP)) {
+      const maxHP = getMaxHPByAttributes(player.characterProfile?.calculatedAttributes || createEmptyAttributes());
+      player.currentHP = Math.max(0, Math.min(maxHP, Math.floor(nextHP)));
+    }
+
+    const nextMP = Number(fields.当前法力值);
+    if (Number.isFinite(nextMP)) {
+      const maxMP = getMaxMPByAttributes(player.characterProfile?.calculatedAttributes || createEmptyAttributes());
+      player.currentMP = Math.max(0, Math.min(maxMP, Math.floor(nextMP)));
+    }
+
+    const addStatus = Array.isArray(fields.状态_add)
+      ? fields.状态_add.filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())
+      : [];
+    if (addStatus.length) {
+      const merged = new Set([...(player.statusEffects || []), ...addStatus]);
+      player.statusEffects = Array.from(merged);
+    }
+
+    const removeStatus = Array.isArray(fields.状态_remove)
+      ? fields.状态_remove.filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())
+      : [];
+    if (removeStatus.length) {
+      const removeSet = new Set(removeStatus);
+      player.statusEffects = (player.statusEffects || []).filter((s) => !removeSet.has(s));
+    }
+
+    syncPlayerCombatStats(player);
+  }
+};
 
 const syncHostIfNeeded = (room: Room) => {
   const activePlayers = getActivePlayers(room);
@@ -1253,7 +1380,10 @@ io.on("connection", (socket) => {
         },
         aiSettings: cloneDefaultAISettings(),
         selectedRoleTemplateId: script.roleTemplates[0]?.id || null,
-        characterProfile: createDefaultCharacterProfile(script.roleTemplates[0])
+        characterProfile: createDefaultCharacterProfile(script.roleTemplates[0]),
+        currentHP: getMaxHPByAttributes(script.roleTemplates[0].baseAttributes),
+        currentMP: getMaxMPByAttributes(script.roleTemplates[0].baseAttributes),
+        statusEffects: []
       }],
       status: "waiting",
       hasStarted: false,
@@ -1422,7 +1552,10 @@ io.on("connection", (socket) => {
       },
       aiSettings: cloneDefaultAISettings(),
       selectedRoleTemplateId: firstTemplate.id,
-      characterProfile: createDefaultCharacterProfile(firstTemplate)
+      characterProfile: createDefaultCharacterProfile(firstTemplate),
+      currentHP: getMaxHPByAttributes(firstTemplate.baseAttributes),
+      currentMP: getMaxMPByAttributes(firstTemplate.baseAttributes),
+      statusEffects: []
     };
 
     room.players.push(newPlayer);
@@ -1817,20 +1950,94 @@ async function processTurn(roomId: string) {
     io.to(roomId).emit("room_updated", room);
     io.emit("rooms_list_updated");
 
-    const story = await runMainStory(room, groupedActions);
-
-    for (let i = 0; i < story.length; i += 24) {
-      const chunk = story.slice(i, i + 24);
-      io.to(roomId).emit("story_stream_chunk", { chunk });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+    const storyRaw = await runMainStory(room, groupedActions);
+    const storyPayload = safeJsonParse<MainStoryPayload>(storyRaw);
+    if (!storyPayload || !Array.isArray(storyPayload.segments)) {
+      throw new Error("mainStory 输出JSON无效");
     }
+
     io.to(roomId).emit("story_stream_end");
 
     room.status = "settlement";
     io.to(roomId).emit("room_updated", room);
     io.emit("rooms_list_updated");
 
-    const changes = await runStateProcessor(room, story);
+    const storyByPlayer: Record<string, string> = {};
+    const globalSummary = typeof storyPayload.globalSummary === "string" ? storyPayload.globalSummary.trim() : "";
+
+    for (const player of room.players) {
+      storyByPlayer[player.id] = globalSummary ? `${globalSummary}\n\n` : "";
+    }
+
+    const grouped = groupedActions as { groups?: Array<{ groupId?: string; playerIds?: string[] }>; rawActions?: Array<{ playerId?: string; playerName?: string }> };
+    const groupPlayerMap = new Map<string, string[]>();
+    for (const g of grouped?.groups || []) {
+      if (!g?.groupId) continue;
+      const ids = Array.isArray(g.playerIds) ? g.playerIds : [];
+      groupPlayerMap.set(g.groupId, ids);
+    }
+
+    const nameToId = new Map<string, string>();
+    for (const a of grouped?.rawActions || []) {
+      const name = String(a?.playerName || "").trim();
+      const id = String(a?.playerId || "").trim();
+      if (name && id) nameToId.set(name, id);
+    }
+    for (const p of room.players) {
+      if (p.name && p.id) nameToId.set(p.name, p.id);
+    }
+
+    for (const seg of storyPayload.segments) {
+      const title = (seg.title || "").trim();
+      const content = (seg.content || "").trim();
+      const block = [title, content].filter(Boolean).join("\n").trim();
+      if (!block) continue;
+
+      const directIds = Array.isArray(seg.visibleToPlayerIds) ? seg.visibleToPlayerIds : [];
+      let resolvedIds = directIds.filter((id) => room.players.some((p) => p.id === id));
+
+      if (resolvedIds.length === 0 && seg.groupId && groupPlayerMap.has(seg.groupId)) {
+        resolvedIds = (groupPlayerMap.get(seg.groupId) || []).filter((id) => room.players.some((p) => p.id === id));
+      }
+
+      if (resolvedIds.length === 0 && title) {
+        const titleNames = Array.from(title.matchAll(/【([^\]]+)】/g)).map((m) => String(m[1] || "").trim()).filter(Boolean);
+        resolvedIds = titleNames
+          .map((n) => nameToId.get(n) || "")
+          .filter((id) => Boolean(id) && room.players.some((p) => p.id === id));
+      }
+
+      if (resolvedIds.length === 0) {
+        resolvedIds = room.players.map((p) => p.id);
+      }
+
+      for (const playerId of resolvedIds) {
+        if (!storyByPlayer[playerId]) storyByPlayer[playerId] = "";
+        storyByPlayer[playerId] += `${block}\n\n`;
+      }
+    }
+
+    if (Array.isArray(storyPayload.nextHints)) {
+      for (const hintItem of storyPayload.nextHints) {
+        if (!hintItem || typeof hintItem.playerId !== "string") continue;
+        const hint = typeof hintItem.hint === "string" ? hintItem.hint.trim() : "";
+        if (!hint) continue;
+        if (!storyByPlayer[hintItem.playerId]) storyByPlayer[hintItem.playerId] = "";
+        storyByPlayer[hintItem.playerId] += `【下一步可选行动提示】${hint}\n`;
+      }
+    }
+
+    room.players.forEach((player) => {
+      const personalStory = (storyByPlayer[player.id] || "").trim() || "本回合没有你的可见剧情。";
+      io.to(player.id).emit("player_story", {
+        story: personalStory,
+        round: room.currentRound
+      });
+    });
+
+    const stateStoryText = buildStateStoryText(storyPayload) || Object.values(storyByPlayer).join("\n\n");
+    const changes = await runStateProcessor(room, stateStoryText);
+    applyStateChanges(room, changes);
 
     const stateLog = {
       id: `${Date.now()}-state`,
@@ -1851,7 +2058,7 @@ async function processTurn(roomId: string) {
     io.to(roomId).emit("turn_progress", { readyCount: 0, total: getActivePlayers(room).length });
     io.to(roomId).emit("round_complete", {
       room,
-      story: story || "本回合没有生成有效剧情。"
+      story: globalSummary || "回合处理完成。"
     });
     io.emit("rooms_list_updated");
   } catch (error) {

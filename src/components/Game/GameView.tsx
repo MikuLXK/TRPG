@@ -24,6 +24,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
   const [totalPlayers, setTotalPlayers] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamPreview, setStreamPreview] = useState('');
+  const [receivedPersonalStory, setReceivedPersonalStory] = useState(false);
 
   const roomPlayers = roomState?.players || [];
   const roleTemplates: ScriptRoleTemplate[] = roomState?.script?.roleTemplates || [];
@@ -96,19 +97,22 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     setTotalPlayers(roomState?.players?.length || 0);
 
     const onRoundComplete = ({ story }: { room: any; story: string }) => {
-      const newLog: 游戏日志 = {
-        id: Date.now().toString(),
-        发送者: '系统',
-        内容: story,
-        类型: '旁白',
-        时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
+      if (story && !receivedPersonalStory) {
+        const newLog: 游戏日志 = {
+          id: Date.now().toString(),
+          发送者: '系统',
+          内容: story,
+          类型: '旁白',
+          时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
 
-      set游戏数据((prev) => ({
-        ...prev,
-        日志列表: [...prev.日志列表, newLog]
-      }));
+        set游戏数据((prev) => ({
+          ...prev,
+          日志列表: [...prev.日志列表, newLog]
+        }));
+      }
 
+      setReceivedPersonalStory(false);
       setIsReady(false);
       setReadyCount(0);
       setIsStreaming(false);
@@ -148,6 +152,24 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       setStreamPreview('');
     };
 
+    const onPlayerStory = ({ story }: { story: string; round: number }) => {
+      const newLog: 游戏日志 = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        发送者: '系统',
+        内容: story,
+        类型: '旁白',
+        时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      set游戏数据((prev) => ({
+        ...prev,
+        日志列表: [...prev.日志列表, newLog]
+      }));
+      setReceivedPersonalStory(true);
+      setIsStreaming(false);
+      setStreamPreview('');
+    };
+
     socket.on('round_complete', onRoundComplete);
     socket.on('room_updated', onRoomUpdated);
     socket.on('new_log', onNewLog);
@@ -155,6 +177,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     socket.on('story_stream_start', onStoryStreamStart);
     socket.on('story_stream_chunk', onStoryStreamChunk);
     socket.on('story_stream_end', onStoryStreamEnd);
+    socket.on('player_story', onPlayerStory);
 
     return () => {
       socket.off('round_complete', onRoundComplete);
@@ -164,8 +187,9 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       socket.off('story_stream_start', onStoryStreamStart);
       socket.off('story_stream_chunk', onStoryStreamChunk);
       socket.off('story_stream_end', onStoryStreamEnd);
+      socket.off('player_story', onPlayerStory);
     };
-  }, [roomState]);
+  }, [roomState, receivedPersonalStory]);
 
   const handleSendMessage = (text: string) => {
     if (isReady) return;

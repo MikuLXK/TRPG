@@ -7,7 +7,25 @@
       "createdAt": 1772363586430,
       "status": "active",
       "role": "moderator",
-      "lastLoginAt": 1772433415152
+      "lastLoginAt": 1772438927951
+    },
+    {
+      "uid": "00002",
+      "username": "MikuLXK",
+      "password": "2ba24de77a191c7d59319e5c2b80f76619b02f4fcd279ad87bd3503867395568",
+      "createdAt": 1772434957539,
+      "status": "active",
+      "role": "player",
+      "lastLoginAt": 1772435369611
+    },
+    {
+      "uid": "00003",
+      "username": "L",
+      "password": "6d4763dde868e8be49e2e097210506cf4645231474f2e80b81482d55d0fe616d",
+      "createdAt": 1772435267580,
+      "status": "active",
+      "role": "player",
+      "lastLoginAt": 1772435267580
     }
   ],
   "scripts": [
@@ -452,6 +470,49 @@
   "workshopScripts": [],
   "cloudSaves": [],
   "logs": [
+    {
+      "id": "1772438945654-u56y8t",
+      "timestamp": 1772438945654,
+      "operator": "admin",
+      "action": "force_close_room",
+      "targetType": "room",
+      "targetId": "Z0PUOC",
+      "details": {
+        "roomName": "龙与地下城：斯特拉德的诅咒"
+      }
+    },
+    {
+      "id": "1772438927951-ved09d",
+      "timestamp": 1772438927951,
+      "operator": "admin",
+      "action": "admin_login",
+      "targetType": "system",
+      "targetId": "admin"
+    },
+    {
+      "id": "1772435369611-crvfrl",
+      "timestamp": 1772435369611,
+      "operator": "MikuLXK",
+      "action": "player_login",
+      "targetType": "user",
+      "targetId": "MikuLXK"
+    },
+    {
+      "id": "1772435267580-3oq4on",
+      "timestamp": 1772435267580,
+      "operator": "system",
+      "action": "register_user",
+      "targetType": "user",
+      "targetId": "L"
+    },
+    {
+      "id": "1772434957539-reo8at",
+      "timestamp": 1772434957539,
+      "operator": "system",
+      "action": "register_user",
+      "targetType": "user",
+      "targetId": "MikuLXK"
+    },
     {
       "id": "1772433423162-94g7cn",
       "timestamp": 1772433423162,

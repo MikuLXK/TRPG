@@ -1,7 +1,10 @@
-以下是剧情文本：
-{{storyText}}
-
-以下是当前玩家状态（JSON）：
-{{currentStateJson}}
-
-请提取可确定的状态变化。
+{
+  "task": "extract_state_changes",
+  "input": {{stateProcessorInputJson}},
+  "requirements": [
+    "只提取能在story.segments或globalSummary中找到依据的变化。",
+    "位置变化使用字段: 位置。",
+    "生命/法力变化优先使用: 生命值, 法力值；必要时可给出当前生命值/当前法力值。",
+    "状态效果增减分别使用: 状态_add, 状态_remove。"
+  ]
+}

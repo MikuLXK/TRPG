@@ -1,29 +1,24 @@
-请只输出JSON，不要输出额外解释。结构如下：
 {
-  "globalSummary": "所有玩家都能看到的简短公共事件（可为空）",
-  "segments": [
-    {
-      "groupId": "g1",
-      "visibleToPlayerIds": ["p1", "p2"],
-      "title": "【玩家A】|【玩家B】",
-      "content": "该组剧情正文"
-    },
-    {
-      "groupId": "g2",
-      "visibleToPlayerIds": ["p3"],
-      "title": "【玩家C】",
-      "content": "该组剧情正文"
-    }
-  ],
-  "nextHints": [
-    {
-      "playerId": "p1",
-      "hint": "下一步可选行动提示"
-    }
+  "output_schema": {
+    "globalSummary": "公共摘要，可空字符串",
+    "segments": [
+      {
+        "groupId": "g1",
+        "visibleToPlayerIds": ["p1", "p2"],
+        "title": "【玩家A】|【玩家B】",
+        "content": "该组剧情正文"
+      }
+    ],
+    "nextHints": [
+      {
+        "playerId": "p1",
+        "hint": "玩家p1下一步提示"
+      }
+    ]
+  },
+  "constraints": [
+    "输出只能是JSON对象。",
+    "segments必须覆盖全部groups。",
+    "visibleToPlayerIds必须与groupId对应玩家一致。"
   ]
 }
-
-要求：
-1) 严格依据输入事实，不得凭空新增关键设定。
-2) segments 必须覆盖所有分组；visibleToPlayerIds 必须与对应分组玩家一致。
-3) title 需按“【玩家A】|【玩家B】”格式。

@@ -1,0 +1,24 @@
+{
+  "protocol_id": "trpg_json_output_format_v2",
+  "hard_rules": [
+    "最终输出必须是单个JSON对象。",
+    "禁止Markdown代码块、禁止标签模式、禁止解释段落。",
+    "键名必须与schema完全一致。"
+  ],
+  "schemas": {
+    "actionCollector": {
+      "root": ["groups", "rawActions"],
+      "groups_item": ["groupId", "groupType", "location", "playerIds", "reason"],
+      "groupType_enum": ["together", "solo"]
+    },
+    "mainStory": {
+      "root": ["globalSummary", "segments", "nextHints"],
+      "segments_item": ["groupId", "visibleToPlayerIds", "title", "content"],
+      "title_pattern": "【玩家A】|【玩家B】"
+    },
+    "stateProcessor": {
+      "root": ["changes"],
+      "changes_item": ["playerId", "fields", "reason"]
+    }
+  }
+}

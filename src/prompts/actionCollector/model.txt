@@ -1,31 +1,26 @@
-请只输出JSON，不要输出额外解释文本。JSON结构如下：
 {
-  "groups": [
-    {
-      "groupId": "g1",
-      "groupType": "together",
-      "location": "酒馆",
-      "playerIds": ["p1", "p2"],
-      "reason": "简要说明分组依据"
-    },
-    {
-      "groupId": "g2",
-      "groupType": "solo",
-      "location": "城门",
-      "playerIds": ["p3"],
-      "reason": "简要说明分组依据"
-    }
-  ],
-  "rawActions": [
-    {
-      "playerId": "p1",
-      "playerName": "玩家A",
-      "location": "酒馆",
-      "action": "原始输入"
-    }
+  "output_schema": {
+    "groups": [
+      {
+        "groupId": "g1",
+        "groupType": "together",
+        "location": "地点",
+        "playerIds": ["p1", "p2"],
+        "reason": "分组依据"
+      }
+    ],
+    "rawActions": [
+      {
+        "playerId": "p1",
+        "playerName": "玩家A",
+        "location": "地点",
+        "action": "玩家原始输入"
+      }
+    ]
+  },
+  "constraints": [
+    "输出只能是JSON对象。",
+    "groups必须覆盖全部玩家且互斥。",
+    "groupType只能是together或solo。"
   ]
 }
-
-要求：
-1) 必须覆盖全部玩家，每个玩家只能在一个 group 中出现一次。
-2) 仅当玩家明确同地且协同行动时使用 together，否则使用 solo。

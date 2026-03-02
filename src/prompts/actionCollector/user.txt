@@ -1,8 +1,10 @@
-以下是本回合所有玩家的行动输入（JSON）：
-{{actionsJson}}
-
-请你将玩家按“共同行动组”进行归类，重点依据：
-1) 行动文本语义是否互相协同
-2) 玩家当前是否在同一位置（location）
-
-请保留每位玩家的原始行动文本与位置信息。
+{
+  "task": "collect_player_actions",
+  "input": {{actionCollectorInputJson}},
+  "requirements": [
+    "先按location划分，再判断是否协同行动。",
+    "together只用于同地且有协作关系的玩家。",
+    "无法确认协作时一律拆为solo。",
+    "rawActions保留每位玩家原始action。"
+  ]
+}

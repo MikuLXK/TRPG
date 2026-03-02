@@ -156,6 +156,7 @@ type AdminUserStatus = "active" | "disabled";
 type AdminUserRole = "player" | "moderator";
 
 interface ManagedUser {
+  uid: string;
   username: string;
   password: string;
   createdAt: number;
@@ -167,6 +168,25 @@ interface ManagedUser {
 interface ManagedScript extends ScriptDefinition {
   source: "builtin" | "admin";
   isPublished: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface WorkshopScriptRecord extends ScriptDefinition {
+  ownerUid: string;
+  ownerUsername: string;
+  isPublic: boolean;
+  createdAt: number;
+  updatedAt: number;
+  downloads: number;
+}
+
+interface CloudSaveRecord {
+  id: string;
+  name: string;
+  data: unknown;
+  ownerUid: string;
+  ownerUsername: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -184,11 +204,14 @@ interface AdminLogEntry {
 interface AdminDataStore {
   users: ManagedUser[];
   scripts: ManagedScript[];
+  workshopScripts: WorkshopScriptRecord[];
+  cloudSaves: CloudSaveRecord[];
   logs: AdminLogEntry[];
 }
 
 interface AuthPayload {
   username: string;
+  uid?: string;
   role: "admin" | "player";
   exp: number;
 }
@@ -201,6 +224,26 @@ const ADMIN_DEFAULT_PASSWORD = process.env.ADMIN_PASSWORD || "admin123456";
 const PLAYER_TOKEN_SECRET = process.env.PLAYER_TOKEN_SECRET || randomBytes(32).toString("hex");
 const PLAYER_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ADMIN_TOKEN_TTL_SECONDS = 24 * 60 * 60;
+
+const formatNumericUid = (num: number) => String(num).padStart(5, "0");
+
+const normalizeUidValue = (uid: string) => {
+  if (!/^\d+$/.test(uid || "")) return "";
+  const value = Number(uid);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return formatNumericUid(value);
+};
+
+const getMaxUidNumber = () => {
+  return adminState.users.reduce((max, user) => {
+    const normalizedUid = normalizeUidValue(user.uid || "");
+    if (!normalizedUid) return max;
+    const current = Number(normalizedUid);
+    return Number.isFinite(current) ? Math.max(max, current) : max;
+  }, 0);
+};
+
+const generateUserUid = () => formatNumericUid(getMaxUidNumber() + 1);
 
 const createBuiltinManagedScripts = (): ManagedScript[] => {
   const now = Date.now();
@@ -216,6 +259,8 @@ const createBuiltinManagedScripts = (): ManagedScript[] => {
 const adminState: AdminDataStore = {
   users: [],
   scripts: createBuiltinManagedScripts(),
+  workshopScripts: [],
+  cloudSaves: [],
   logs: []
 };
 
@@ -241,6 +286,30 @@ const addAdminLog = (
 };
 
 const sha256 = (text: string) => createHmac("sha256", "trpg-password-hash").update(text).digest("hex");
+
+const ensureUserUid = () => {
+  const used = new Set<string>();
+  let next = getMaxUidNumber() + 1;
+
+  adminState.users.forEach((user) => {
+    const normalizedUid = normalizeUidValue(user.uid || "");
+    const unique = normalizedUid && !used.has(normalizedUid);
+    if (unique) {
+      user.uid = normalizedUid;
+      used.add(normalizedUid);
+      return;
+    }
+
+    let nextUid = formatNumericUid(next);
+    while (used.has(nextUid)) {
+      next += 1;
+      nextUid = formatNumericUid(next);
+    }
+    user.uid = nextUid;
+    used.add(nextUid);
+    next += 1;
+  });
+};
 
 const signToken = (payload: AuthPayload, secret: string) => {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -285,6 +354,7 @@ const ensureDefaultAdminUser = () => {
   const hasAdmin = adminState.users.some((user) => user.role === "moderator" && user.username === ADMIN_DEFAULT_USERNAME);
   if (hasAdmin) return;
   adminState.users.push({
+    uid: generateUserUid(),
     username: ADMIN_DEFAULT_USERNAME,
     password: sha256(ADMIN_DEFAULT_PASSWORD),
     createdAt: Date.now(),
@@ -339,6 +409,7 @@ const initializeAdminState = async () => {
         adminState.users = parsed.users
           .filter((user): user is ManagedUser => Boolean(user?.username && user?.password && user?.role))
           .map((user) => ({
+            uid: typeof (user as Partial<ManagedUser>).uid === "string" ? (user as Partial<ManagedUser>).uid!.trim() : "",
             username: String(user.username).trim(),
             password: String(user.password),
             createdAt: Number.isFinite(user.createdAt) ? user.createdAt : Date.now(),
@@ -352,6 +423,34 @@ const initializeAdminState = async () => {
         normalizeManagedScripts(parsed.scripts as ManagedScript[]);
       }
 
+      if (Array.isArray(parsed.workshopScripts)) {
+        adminState.workshopScripts = parsed.workshopScripts
+          .filter((script): script is WorkshopScriptRecord => Boolean(script?.id && script?.title && script?.ownerUid))
+          .map((script) => ({
+            ...sanitizeScriptInput(script),
+            ownerUid: String(script.ownerUid),
+            ownerUsername: String(script.ownerUsername || ""),
+            isPublic: script.isPublic !== false,
+            createdAt: Number.isFinite(script.createdAt) ? Number(script.createdAt) : Date.now(),
+            updatedAt: Number.isFinite(script.updatedAt) ? Number(script.updatedAt) : Date.now(),
+            downloads: Number.isFinite(script.downloads) ? Math.max(0, Number(script.downloads)) : 0
+          }));
+      }
+
+      if (Array.isArray(parsed.cloudSaves)) {
+        adminState.cloudSaves = parsed.cloudSaves
+          .filter((save): save is CloudSaveRecord => Boolean(save?.id && save?.name && save?.ownerUid))
+          .map((save) => ({
+            id: String(save.id),
+            name: String(save.name),
+            data: save.data,
+            ownerUid: String(save.ownerUid),
+            ownerUsername: String(save.ownerUsername || ""),
+            createdAt: Number.isFinite(save.createdAt) ? Number(save.createdAt) : Date.now(),
+            updatedAt: Number.isFinite(save.updatedAt) ? Number(save.updatedAt) : Date.now()
+          }));
+      }
+
       if (Array.isArray(parsed.logs)) {
         adminState.logs = parsed.logs
           .filter((log): log is AdminLogEntry => Boolean(log?.id && log?.action && log?.operator && log?.targetType && log?.targetId))
@@ -363,12 +462,14 @@ const initializeAdminState = async () => {
   }
 
   ensureDefaultAdminUser();
+  ensureUserUid();
   await persistAdminState();
 };
 
 const adminStateReady = initializeAdminState();
 
 const buildAuthUserResponse = (user: ManagedUser) => ({
+  uid: user.uid,
   username: user.username,
   role: user.role,
   status: user.status,
@@ -381,6 +482,32 @@ const issueAdminToken = (username: string) => signToken({
   role: "admin",
   exp: Date.now() + ADMIN_TOKEN_TTL_SECONDS * 1000
 }, ADMIN_TOKEN_SECRET);
+
+const issuePlayerToken = (user: ManagedUser) => signToken({
+  uid: user.uid,
+  username: user.username,
+  role: "player",
+  exp: Date.now() + PLAYER_TOKEN_TTL_SECONDS * 1000
+}, PLAYER_TOKEN_SECRET);
+
+const requirePlayer = async (req: Request, res: Response, next: NextFunction) => {
+  await adminStateReady;
+  const token = getBearerToken(req.headers.authorization);
+  const payload = verifyToken(token, PLAYER_TOKEN_SECRET);
+  if (!payload || payload.role !== "player") {
+    res.status(401).json({ error: "用户身份无效或已过期" });
+    return;
+  }
+
+  const user = adminState.users.find((item) => item.username === payload.username);
+  if (!user || user.status === "disabled") {
+    res.status(403).json({ error: "账号不可用" });
+    return;
+  }
+
+  (req as Request & { playerUser?: ManagedUser }).playerUser = user;
+  next();
+};
 
 const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
   await adminStateReady;
@@ -1784,6 +1911,7 @@ app.post("/api/auth/register", async (req, res) => {
 
   const now = Date.now();
   const user: ManagedUser = {
+    uid: generateUserUid(),
     username,
     password: sha256(password),
     createdAt: now,
@@ -1797,13 +1925,9 @@ app.post("/api/auth/register", async (req, res) => {
   await persistAdminState();
 
   res.json({
-    user: {
-      username: user.username,
-      role: user.role,
-      status: user.status,
-      createdAt: user.createdAt,
-      lastLoginAt: user.lastLoginAt
-    }
+    token: issuePlayerToken(user),
+    expiresIn: PLAYER_TOKEN_TTL_SECONDS,
+    user: buildAuthUserResponse(user)
   });
 });
 
@@ -1833,14 +1957,44 @@ app.post("/api/auth/login", async (req, res) => {
   await persistAdminState();
 
   res.json({
-    user: {
-      username: user.username,
-      role: user.role,
-      status: user.status,
-      createdAt: user.createdAt,
-      lastLoginAt: user.lastLoginAt
-    }
+    token: issuePlayerToken(user),
+    expiresIn: PLAYER_TOKEN_TTL_SECONDS,
+    user: buildAuthUserResponse(user)
   });
+});
+
+app.get("/api/auth/me", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  res.json({ user: buildAuthUserResponse(user) });
+});
+
+app.post("/api/auth/change-password", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const oldPassword = String(req.body?.oldPassword || "");
+  const newPassword = String(req.body?.newPassword || "");
+
+  if (!oldPassword || !newPassword) {
+    res.status(400).json({ error: "请填写旧密码与新密码" });
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    res.status(400).json({ error: "新密码长度至少 6 位" });
+    return;
+  }
+
+  if (sha256(oldPassword) !== user.password) {
+    res.status(400).json({ error: "旧密码错误" });
+    return;
+  }
+
+  user.password = sha256(newPassword);
+  addAdminLog(user.username, "change_password", "user", user.username);
+  await persistAdminState();
+
+  res.json({ ok: true });
 });
 
 app.get("/api/prompts/defaults", async (_req, res) => {
@@ -1999,7 +2153,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 10));
 
   let list = [...adminState.users];
-  if (query) list = list.filter((user) => user.username.toLowerCase().includes(query));
+  if (query) list = list.filter((user) => user.username.toLowerCase().includes(query) || user.uid.toLowerCase().includes(query));
   if (status === "active" || status === "disabled") list = list.filter((user) => user.status === status);
   if (role === "player" || role === "moderator") list = list.filter((user) => user.role === role);
 
@@ -2068,6 +2222,39 @@ app.patch("/api/admin/users/:username", requireAdmin, async (req, res) => {
 
   await persistAdminState();
   res.json({ user: buildAuthUserResponse(target) });
+});
+
+app.delete("/api/admin/users/:username", requireAdmin, async (req, res) => {
+  await adminStateReady;
+  const operator = (req as Request & { adminUser: ManagedUser }).adminUser;
+  const username = String(req.params.username || "").trim();
+  const index = adminState.users.findIndex((user) => user.username === username);
+
+  if (index < 0) {
+    res.status(404).json({ error: "用户不存在" });
+    return;
+  }
+
+  const target = adminState.users[index];
+
+  if (target.username === operator.username) {
+    res.status(400).json({ error: "不能删除当前登录管理员" });
+    return;
+  }
+
+  if (target.role === "moderator") {
+    const moderators = adminState.users.filter((user) => user.role === "moderator");
+    if (moderators.length <= 1) {
+      res.status(400).json({ error: "至少需要保留一个管理员账号" });
+      return;
+    }
+  }
+
+  adminState.users.splice(index, 1);
+  addAdminLog(operator.username, "delete_user", "user", target.username, { uid: target.uid, role: target.role });
+  await persistAdminState();
+
+  res.json({ ok: true });
 });
 
 app.get("/api/admin/scripts", requireAdmin, async (_req, res) => {
@@ -2264,6 +2451,260 @@ app.get("/api/admin/logs", requireAdmin, async (req, res) => {
   rows = rows.slice(start, start + pageSize);
 
   res.json({ rows, total, page, pageSize });
+});
+
+app.get("/api/workshop/scripts", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const query = String(req.query.q || "").trim().toLowerCase();
+  const mineOnly = String(req.query.mine || "").trim() === "1";
+
+  let rows = adminState.workshopScripts.filter((script) => (mineOnly ? script.ownerUid === user.uid : script.isPublic || script.ownerUid === user.uid));
+
+  if (query) {
+    rows = rows.filter((script) => {
+      const haystack = `${script.id} ${script.title} ${script.description} ${(script.tags || []).join(" ")} ${script.ownerUsername}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+
+  rows.sort((a, b) => b.updatedAt - a.updatedAt);
+  res.json({ rows });
+});
+
+app.post("/api/workshop/scripts", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const base = sanitizeScriptInput(req.body || {});
+  const now = Date.now();
+  const scriptId = String(base.id || `workshop-${now}`).trim();
+
+  if (!scriptId) {
+    res.status(400).json({ error: "剧本 ID 不能为空" });
+    return;
+  }
+
+  if (!Array.isArray(base.roleTemplates) || base.roleTemplates.length === 0) {
+    res.status(400).json({ error: "剧本至少需要一个角色模板" });
+    return;
+  }
+
+  const exists = adminState.workshopScripts.find((item) => item.id === scriptId);
+  if (exists) {
+    res.status(400).json({ error: "剧本 ID 已存在" });
+    return;
+  }
+
+  const record: WorkshopScriptRecord = {
+    ...base,
+    id: scriptId,
+    ownerUid: user.uid,
+    ownerUsername: user.username,
+    isPublic: req.body?.isPublic !== false,
+    createdAt: now,
+    updatedAt: now,
+    downloads: 0
+  };
+
+  adminState.workshopScripts.push(record);
+  addAdminLog(user.username, "upload_workshop_script", "script", record.id, { isPublic: record.isPublic });
+  await persistAdminState();
+
+  res.json({ script: record });
+});
+
+app.put("/api/workshop/scripts/:id", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const id = String(req.params.id || "").trim();
+  const index = adminState.workshopScripts.findIndex((item) => item.id === id);
+
+  if (index < 0) {
+    res.status(404).json({ error: "剧本不存在" });
+    return;
+  }
+
+  const current = adminState.workshopScripts[index];
+  if (current.ownerUid !== user.uid && user.role !== "moderator") {
+    res.status(403).json({ error: "无权限修改该剧本" });
+    return;
+  }
+
+  const base = sanitizeScriptInput({ ...current, ...req.body, id: current.id });
+  if (!Array.isArray(base.roleTemplates) || base.roleTemplates.length === 0) {
+    res.status(400).json({ error: "剧本至少需要一个角色模板" });
+    return;
+  }
+
+  const next: WorkshopScriptRecord = {
+    ...base,
+    id: current.id,
+    ownerUid: current.ownerUid,
+    ownerUsername: current.ownerUsername,
+    isPublic: typeof req.body?.isPublic === "boolean" ? req.body.isPublic : current.isPublic,
+    createdAt: current.createdAt,
+    updatedAt: Date.now(),
+    downloads: current.downloads
+  };
+
+  adminState.workshopScripts[index] = next;
+  addAdminLog(user.username, "update_workshop_script", "script", id, { isPublic: next.isPublic });
+  await persistAdminState();
+
+  res.json({ script: next });
+});
+
+app.delete("/api/workshop/scripts/:id", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const id = String(req.params.id || "").trim();
+  const index = adminState.workshopScripts.findIndex((item) => item.id === id);
+
+  if (index < 0) {
+    res.status(404).json({ error: "剧本不存在" });
+    return;
+  }
+
+  const target = adminState.workshopScripts[index];
+  if (target.ownerUid !== user.uid && user.role !== "moderator") {
+    res.status(403).json({ error: "无权限删除该剧本" });
+    return;
+  }
+
+  adminState.workshopScripts.splice(index, 1);
+  addAdminLog(user.username, "delete_workshop_script", "script", id);
+  await persistAdminState();
+
+  res.json({ ok: true });
+});
+
+app.post("/api/workshop/scripts/:id/download", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const id = String(req.params.id || "").trim();
+  const script = adminState.workshopScripts.find((item) => item.id === id);
+
+  if (!script || !script.isPublic) {
+    res.status(404).json({ error: "剧本不存在或未公开" });
+    return;
+  }
+
+  script.downloads += 1;
+  script.updatedAt = Date.now();
+  await persistAdminState();
+
+  res.json({ script });
+});
+
+app.get("/api/cloud/saves", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const rows = adminState.cloudSaves
+    .filter((save) => save.ownerUid === user.uid)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map((save) => ({
+      id: save.id,
+      name: save.name,
+      ownerUid: save.ownerUid,
+      ownerUsername: save.ownerUsername,
+      createdAt: save.createdAt,
+      updatedAt: save.updatedAt
+    }));
+
+  res.json({ rows });
+});
+
+app.get("/api/cloud/saves/:id", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const id = String(req.params.id || "").trim();
+  const save = adminState.cloudSaves.find((item) => item.id === id && item.ownerUid === user.uid);
+
+  if (!save) {
+    res.status(404).json({ error: "云存档不存在" });
+    return;
+  }
+
+  res.json({ save });
+});
+
+app.post("/api/cloud/saves", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const now = Date.now();
+  const name = String(req.body?.name || "").trim();
+  const data = req.body?.data;
+
+  if (!name) {
+    res.status(400).json({ error: "存档名称不能为空" });
+    return;
+  }
+
+  if (data === undefined || data === null) {
+    res.status(400).json({ error: "存档数据不能为空" });
+    return;
+  }
+
+  const record: CloudSaveRecord = {
+    id: String(req.body?.id || `cloud-${now}-${Math.random().toString(36).slice(2, 8)}`),
+    name,
+    data,
+    ownerUid: user.uid,
+    ownerUsername: user.username,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  adminState.cloudSaves = [record, ...adminState.cloudSaves.filter((save) => save.id !== record.id)];
+  addAdminLog(user.username, "upload_cloud_save", "system", record.id, { name: record.name });
+  await persistAdminState();
+
+  res.json({ save: record });
+});
+
+app.put("/api/cloud/saves/:id", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const id = String(req.params.id || "").trim();
+  const save = adminState.cloudSaves.find((item) => item.id === id && item.ownerUid === user.uid);
+
+  if (!save) {
+    res.status(404).json({ error: "云存档不存在" });
+    return;
+  }
+
+  const nextName = String(req.body?.name || save.name).trim();
+  const nextData = req.body?.data ?? save.data;
+
+  if (!nextName) {
+    res.status(400).json({ error: "存档名称不能为空" });
+    return;
+  }
+
+  save.name = nextName;
+  save.data = nextData;
+  save.updatedAt = Date.now();
+  addAdminLog(user.username, "update_cloud_save", "system", save.id, { name: save.name });
+  await persistAdminState();
+
+  res.json({ save });
+});
+
+app.delete("/api/cloud/saves/:id", requirePlayer, async (req, res) => {
+  await adminStateReady;
+  const user = (req as Request & { playerUser: ManagedUser }).playerUser;
+  const id = String(req.params.id || "").trim();
+  const index = adminState.cloudSaves.findIndex((item) => item.id === id && item.ownerUid === user.uid);
+
+  if (index < 0) {
+    res.status(404).json({ error: "云存档不存在" });
+    return;
+  }
+
+  adminState.cloudSaves.splice(index, 1);
+  addAdminLog(user.username, "delete_cloud_save", "system", id);
+  await persistAdminState();
+
+  res.json({ ok: true });
 });
 
 httpServer.listen(PORT, "0.0.0.0", () => {

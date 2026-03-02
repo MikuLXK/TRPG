@@ -2,6 +2,34 @@ import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { 游戏状态 } from '../types/GameData';
 import type { ScriptDefinition } from '../types/Script';
 
+export interface AuthUserProfile {
+  uid: string;
+  username: string;
+  role: 'player' | 'moderator';
+  status: 'active' | 'disabled';
+  createdAt: number;
+  lastLoginAt: number | null;
+}
+
+export interface WorkshopScriptRecord extends ScriptDefinition {
+  ownerUid: string;
+  ownerUsername: string;
+  isPublic: boolean;
+  createdAt: number;
+  updatedAt: number;
+  downloads: number;
+}
+
+export interface CloudSaveRecord {
+  id: string;
+  name: string;
+  data?: 游戏状态;
+  ownerUid: string;
+  ownerUsername: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface GameDB extends DBSchema {
   saves: {
     key: string;
@@ -23,6 +51,7 @@ interface GameDB extends DBSchema {
   users: {
     key: string;
     value: {
+      uid: string;
       username: string;
       password: string;
       createdAt: number;
@@ -31,7 +60,8 @@ interface GameDB extends DBSchema {
 }
 
 const DB_NAME = 'TRPG_Game_DB';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+const PLAYER_TOKEN_KEY = 'trpg_player_token';
 
 const API_BASE =
   typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port !== '3000'
@@ -58,6 +88,49 @@ class DBService {
         }
       },
     });
+  }
+
+  getToken() {
+    return localStorage.getItem(PLAYER_TOKEN_KEY) || '';
+  }
+
+  setToken(token: string) {
+    localStorage.setItem(PLAYER_TOKEN_KEY, token);
+  }
+
+  clearToken() {
+    localStorage.removeItem(PLAYER_TOKEN_KEY);
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}, requireAuth = false): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+    };
+
+    if (requireAuth) {
+      const token = this.getToken();
+      if (!token) {
+        throw new Error('用户尚未登录');
+      }
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: '请求失败' }));
+      const message = payload.error || '请求失败';
+      if (response.status === 401 || response.status === 403) {
+        this.clearToken();
+      }
+      throw new Error(message);
+    }
+
+    return response.json() as Promise<T>;
   }
 
   async saveGame(saveName: string, gameData: 游戏状态): Promise<string> {
@@ -139,6 +212,16 @@ class DBService {
     return `${normalized}::${key}`;
   }
 
+  private async persistLocalUser(user: AuthUserProfile, plainPassword: string) {
+    const db = await this.dbPromise;
+    await db.put('users', {
+      uid: user.uid,
+      username: user.username,
+      password: plainPassword,
+      createdAt: user.createdAt,
+    });
+  }
+
   async registerUser(username: string, password: string) {
     const normalized = username.trim();
     if (!normalized) {
@@ -148,53 +231,49 @@ class DBService {
       throw new Error('密码不能为空');
     }
 
-    const response = await fetch(`${API_BASE}/api/auth/register`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const result = await this.request<{ token: string; user: AuthUserProfile; expiresIn: number }>(
+      '/api/auth/register',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username: normalized, password }),
       },
-      body: JSON.stringify({ username: normalized, password }),
-    });
+      false,
+    );
 
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({ error: '注册失败' }));
-      throw new Error(payload.error || '注册失败');
-    }
-
-    const db = await this.dbPromise;
-    await db.put('users', {
-      username: normalized,
-      password,
-      createdAt: Date.now(),
-    });
+    this.setToken(result.token);
+    await this.persistLocalUser(result.user, password);
+    return result;
   }
 
   async loginUser(username: string, password: string) {
     const normalized = username.trim();
-    const response = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const result = await this.request<{ token: string; user: AuthUserProfile; expiresIn: number }>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username: normalized, password }),
       },
-      body: JSON.stringify({ username: normalized, password }),
-    });
+      false,
+    );
 
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({ error: '用户名或密码错误' }));
-      throw new Error(payload.error || '用户名或密码错误');
-    }
+    this.setToken(result.token);
+    await this.persistLocalUser(result.user, password);
+    return result;
+  }
 
-    const db = await this.dbPromise;
-    const user = await db.get('users', normalized);
-    if (!user) {
-      await db.put('users', {
-        username: normalized,
-        password,
-        createdAt: Date.now(),
-      });
-    }
+  async me() {
+    return this.request<{ user: AuthUserProfile }>('/api/auth/me', {}, true);
+  }
 
-    return { username: normalized };
+  async changePassword(oldPassword: string, newPassword: string) {
+    return this.request<{ ok: boolean }>(
+      '/api/auth/change-password',
+      {
+        method: 'POST',
+        body: JSON.stringify({ oldPassword, newPassword }),
+      },
+      true,
+    );
   }
 
   async saveUserSetting(username: string, key: string, value: any) {
@@ -242,12 +321,92 @@ class DBService {
     return Array.isArray(current) ? current : [];
   }
 
+  async getWorkshopScripts(params: { q?: string; mine?: boolean } = {}) {
+    const query = new URLSearchParams();
+    if (params.q) query.set('q', params.q);
+    if (params.mine) query.set('mine', '1');
+    return this.request<{ rows: WorkshopScriptRecord[] }>(`/api/workshop/scripts?${query.toString()}`, {}, true);
+  }
+
+  async createWorkshopScript(payload: Partial<WorkshopScriptRecord>) {
+    return this.request<{ script: WorkshopScriptRecord }>(
+      '/api/workshop/scripts',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      true,
+    );
+  }
+
+  async updateWorkshopScript(id: string, payload: Partial<WorkshopScriptRecord>) {
+    return this.request<{ script: WorkshopScriptRecord }>(
+      `/api/workshop/scripts/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      true,
+    );
+  }
+
+  async deleteWorkshopScript(id: string) {
+    return this.request<{ ok: boolean }>(
+      `/api/workshop/scripts/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+      true,
+    );
+  }
+
+  async downloadWorkshopScript(id: string) {
+    return this.request<{ script: WorkshopScriptRecord }>(
+      `/api/workshop/scripts/${encodeURIComponent(id)}/download`,
+      { method: 'POST' },
+      true,
+    );
+  }
+
+  async getCloudSaves() {
+    return this.request<{ rows: CloudSaveRecord[] }>('/api/cloud/saves', {}, true);
+  }
+
+  async getCloudSave(id: string) {
+    return this.request<{ save: CloudSaveRecord }>(`/api/cloud/saves/${encodeURIComponent(id)}`, {}, true);
+  }
+
+  async createCloudSave(name: string, data: 游戏状态, id?: string) {
+    return this.request<{ save: CloudSaveRecord }>(
+      '/api/cloud/saves',
+      {
+        method: 'POST',
+        body: JSON.stringify({ name, data, id }),
+      },
+      true,
+    );
+  }
+
+  async updateCloudSave(id: string, payload: { name?: string; data?: 游戏状态 }) {
+    return this.request<{ save: CloudSaveRecord }>(
+      `/api/cloud/saves/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      true,
+    );
+  }
+
+  async deleteCloudSave(id: string) {
+    return this.request<{ ok: boolean }>(`/api/cloud/saves/${encodeURIComponent(id)}`, { method: 'DELETE' }, true);
+  }
+
   async clearAllData() {
     const db = await this.dbPromise;
     await db.clear('saves');
     await db.clear('settings');
     await db.clear('scripts');
     await db.clear('users');
+    this.clearToken();
   }
 
   async getStorageUsage(): Promise<{ usage: number; quota: number }> {

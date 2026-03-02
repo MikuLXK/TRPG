@@ -1,9 +1,9 @@
 import React from 'react';
-import { Crown, Plus, Users, Database, Settings } from 'lucide-react';
+import { Crown, Plus, Users, Settings, UploadCloud, Cloud } from 'lucide-react';
 import MenuButton from '../../UI/MenuButton';
 
 interface MainMenuProps {
-  setView: (view: 'main' | 'create' | 'join') => void;
+  setView: (view: 'main' | 'create' | 'join' | 'workshop' | 'cloud') => void;
   setIsSettingsOpen: (isOpen: boolean) => void;
 }
 
@@ -40,18 +40,25 @@ export default function MainMenu({ setView, setIsSettingsOpen }: MainMenuProps) 
         />
         <div className="grid grid-cols-2 gap-4">
           <MenuButton
-            onClick={() => {}}
-            icon={<Database size={20} />}
-            label="数据管理"
+            onClick={() => setView('workshop')}
+            icon={<UploadCloud size={20} />}
+            label="创意工坊"
             small
           />
           <MenuButton
-            onClick={() => setIsSettingsOpen(true)}
-            icon={<Settings size={20} />}
-            label="系统设置"
+            onClick={() => setView('cloud')}
+            icon={<Cloud size={20} />}
+            label="云存档"
             small
           />
         </div>
+
+        <MenuButton
+          onClick={() => setIsSettingsOpen(true)}
+          icon={<Settings size={20} />}
+          label="系统设置"
+          small
+        />
       </div>
 
       {/* Footer Info */}

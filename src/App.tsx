@@ -3,8 +3,9 @@ import GameView from './components/Game/GameView';
 import Home from './components/Home/Home';
 import WaitingRoom from './components/Home/WaitingRoom';
 import AdminPanel from './components/Admin/AdminPanel';
+import AccountPanel from './components/Account/AccountPanel';
 import { socketService } from './services/socketService';
-import { dbService } from './services/dbService';
+import { dbService, type AuthUserProfile } from './services/dbService';
 import { adminService } from './services/adminService';
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
   const AUTH_USER_STORAGE_KEY = 'trpg_authed_user';
   const ADMIN_USER_STORAGE_KEY = 'trpg_admin_user';
   const [authedUser, setAuthedUser] = useState<string | null>(localStorage.getItem(AUTH_USER_STORAGE_KEY));
+  const [authedProfile, setAuthedProfile] = useState<AuthUserProfile | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -21,6 +23,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
 
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isAccountMode, setIsAccountMode] = useState(false);
   const [adminUser, setAdminUser] = useState<string | null>(localStorage.getItem(ADMIN_USER_STORAGE_KEY));
 
   useEffect(() => {
@@ -37,6 +40,24 @@ export default function App() {
         adminService.clearToken();
         localStorage.removeItem(ADMIN_USER_STORAGE_KEY);
         setAdminUser(null);
+      });
+  }, []);
+
+  useEffect(() => {
+    const token = dbService.getToken();
+    if (!token) return;
+
+    void dbService.me()
+      .then(({ user }) => {
+        localStorage.setItem(AUTH_USER_STORAGE_KEY, user.username);
+        setAuthedUser(user.username);
+        setAuthedProfile(user);
+      })
+      .catch(() => {
+        dbService.clearToken();
+        localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+        setAuthedUser(null);
+        setAuthedProfile(null);
       });
   }, []);
 
@@ -92,11 +113,16 @@ export default function App() {
 
     try {
       if (authMode === 'register') {
-        await dbService.registerUser(username, authPassword);
+        const result = await dbService.registerUser(username, authPassword);
+        localStorage.setItem(AUTH_USER_STORAGE_KEY, result.user.username);
+        setAuthedUser(result.user.username);
+        setAuthedProfile(result.user);
+      } else {
+        const result = await dbService.loginUser(username, authPassword);
+        localStorage.setItem(AUTH_USER_STORAGE_KEY, result.user.username);
+        setAuthedUser(result.user.username);
+        setAuthedProfile(result.user);
       }
-      await dbService.loginUser(username, authPassword);
-      localStorage.setItem(AUTH_USER_STORAGE_KEY, username);
-      setAuthedUser(username);
       setAuthPassword('');
     } catch (error) {
       setAuthError(String((error as Error)?.message || '登录/注册失败'));
@@ -106,8 +132,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    dbService.clearToken();
     localStorage.removeItem(AUTH_USER_STORAGE_KEY);
     setAuthedUser(null);
+    setAuthedProfile(null);
+    setIsAccountMode(false);
     setRoomState(null);
     setIsInGame(false);
     setAuthPassword('');
@@ -294,8 +323,26 @@ export default function App() {
     );
   }
 
+  if (isAccountMode) {
+    return (
+      <AccountPanel
+        onBack={() => setIsAccountMode(false)}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   if (!roomState) {
-    return <Home onJoinGame={handleJoinGame} accountUsername={authedUser} initialPlayerName={authedUser} onLogout={handleLogout} />;
+    return (
+      <Home
+        onJoinGame={handleJoinGame}
+        accountUsername={authedUser}
+        initialPlayerName={authedUser}
+        onLogout={handleLogout}
+        onOpenAccountManager={() => setIsAccountMode(true)}
+        accountUid={authedProfile?.uid}
+      />
+    );
   }
 
   if (!isInGame) {

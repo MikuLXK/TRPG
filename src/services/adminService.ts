@@ -1,4 +1,5 @@
 export interface AdminUser {
+  uid: string;
   username: string;
   role: 'player' | 'moderator';
   status: 'active' | 'disabled';
@@ -144,6 +145,12 @@ class AdminService {
     return this.request<{ user: AdminUser }>(`/api/admin/users/${encodeURIComponent(username)}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteUser(username: string) {
+    return this.request<{ ok: boolean }>(`/api/admin/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
     });
   }
 

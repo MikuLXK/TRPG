@@ -225,6 +225,7 @@ export default function AdminPanel({ adminUsername, onLogout }: AdminPanelProps)
                 <div key={user.username} className="bg-zinc-900/40 border border-zinc-800 rounded p-3 flex items-center justify-between gap-2">
                   <div className="text-sm">
                     <div className="font-semibold">{user.username}</div>
+                    <div className="text-zinc-500 font-mono text-xs mt-0.5">UID: {user.uid}</div>
                     <div className="text-zinc-500">角色: {user.role} | 状态: {user.status} | 创建: {new Date(user.createdAt).toLocaleString()}</div>
                   </div>
                   <div className="flex gap-2">
@@ -254,6 +255,16 @@ export default function AdminPanel({ adminUsername, onLogout }: AdminPanelProps)
                         }, '密码已重置');
                       }}
                     >重置密码</button>
+                    <button
+                      className="px-2 py-1 text-xs border border-red-900/50 text-red-300 rounded"
+                      onClick={() => {
+                        if (!window.confirm(`确认删除用户 ${user.username} ?`)) return;
+                        void withAction(async () => {
+                          await adminService.deleteUser(user.username);
+                          await loadUsers();
+                        }, '用户已删除');
+                      }}
+                    >删除用户</button>
                   </div>
                 </div>
               ))}

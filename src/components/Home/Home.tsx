@@ -7,6 +7,8 @@ import Toast, { ToastType } from '../UI/Toast';
 import MainMenu from './MainMenu/MainMenu';
 import CreateRoom from './CreateRoom/CreateRoom';
 import JoinRoom from './JoinRoom/JoinRoom';
+import WorkshopCenter from './WorkshopCenter';
+import CloudSaveCenter from './CloudSaveCenter';
 import type { ScriptDefinition } from '../../types/Script';
 import type { 游戏状态 } from '../../types/GameData';
 
@@ -15,10 +17,12 @@ interface HomeProps {
   accountUsername: string;
   initialPlayerName?: string;
   onLogout?: () => void;
+  onOpenAccountManager?: () => void;
+  accountUid?: string;
 }
 
-export default function Home({ onJoinGame, accountUsername, initialPlayerName = '', onLogout }: HomeProps) {
-  const [view, setView] = useState<'main' | 'create' | 'join'>('main');
+export default function Home({ onJoinGame, accountUsername, initialPlayerName = '', onLogout, onOpenAccountManager, accountUid }: HomeProps) {
+  const [view, setView] = useState<'main' | 'create' | 'join' | 'workshop' | 'cloud'>('main');
   const [playerName, setPlayerName] = useState(initialPlayerName);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
@@ -225,6 +229,22 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
             accountUsername={accountUsername}
           />
         );
+      case 'workshop':
+        return (
+          <WorkshopCenter
+            accountUsername={accountUsername}
+            onBack={() => setView('main')}
+            showToast={showToast}
+          />
+        );
+      case 'cloud':
+        return (
+          <CloudSaveCenter
+            accountUsername={accountUsername}
+            onBack={() => setView('main')}
+            showToast={showToast}
+          />
+        );
       case 'main':
       default:
         return (
@@ -243,14 +263,32 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
 
   return (
     <div className="w-full h-screen bg-zinc-950 text-zinc-200 font-sans overflow-hidden selection:bg-amber-500/30 selection:text-amber-200 relative">
-      {onLogout && (
-        <button
-          type="button"
-          onClick={onLogout}
-          className="absolute top-4 right-4 z-20 px-3 py-1.5 text-xs rounded border border-zinc-700 text-zinc-300 hover:text-red-300 hover:border-red-500/40"
-        >
-          退出登录
-        </button>
+      {(onLogout || onOpenAccountManager) && (
+        <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+          {accountUid && (
+            <div className="px-3 py-1.5 text-[11px] rounded border border-zinc-700 text-zinc-400 bg-zinc-950/60 font-mono">
+              {accountUid}
+            </div>
+          )}
+          {onOpenAccountManager && (
+            <button
+              type="button"
+              onClick={onOpenAccountManager}
+              className="px-3 py-1.5 text-xs rounded border border-amber-700/60 text-amber-300 hover:bg-amber-700/20"
+            >
+              账号管理
+            </button>
+          )}
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-3 py-1.5 text-xs rounded border border-zinc-700 text-zinc-300 hover:text-red-300 hover:border-red-500/40"
+            >
+              退出登录
+            </button>
+          )}
+        </div>
       )}
 
       {/* Background Effects */}

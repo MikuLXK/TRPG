@@ -6,7 +6,7 @@ interface InventoryViewProps {
 }
 
 export default function InventoryView({ currentRole }: InventoryViewProps) {
-  const list = currentRole?.物品列表 || [];
+  const list = Array.isArray(currentRole?.物品列表) ? currentRole.物品列表 : [];
   return (
     <div className="space-y-3">
       {list.length === 0 ? (
@@ -16,7 +16,11 @@ export default function InventoryView({ currentRole }: InventoryViewProps) {
           <DataRow
             key={`${item.物品ID}-${idx}`}
             label={`${item.名称} x${item.数量}`}
-            value={`${item.类型} / ${item.品质}\n${item.描述 || '无描述'}`}
+            value={[
+              `${item.类型} / ${item.品质}｜ID：${item.物品ID}`,
+              `重量 ${item.重量}｜价值 ${item.价值}｜耐久 ${item.当前耐久}/${item.最大耐久}`,
+              item.描述 || '无描述'
+            ].join('\n')}
           />
         ))
       )}

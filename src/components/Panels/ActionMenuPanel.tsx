@@ -51,7 +51,9 @@ export default function ActionMenuPanel({
     if (openModal === 'skills') return <SkillsView currentRole={currentRole} />;
     if (openModal === 'tasks') return <TasksView gameData={gameData} />;
     if (openModal === 'social') return <SocialView gameData={gameData} />;
-    if (openModal === 'team') return <TeamView players={players} />;
+    if (openModal === 'team') {
+      return <TeamView roomPlayers={players} gameData={gameData} selfPlayerId={selfPlayerId} />;
+    }
     if (openModal === 'story') return <StoryView gameData={gameData} />;
     if (openModal === 'agreements') return <AgreementsView gameData={gameData} />;
     if (openModal === 'memory') {

@@ -214,6 +214,7 @@ export const buildStateProcessorInput = (room: RoomLike, storyPayload: MainStory
     phase: "state_processor",
     round: room.currentRound,
     groupedActions,
+    stateTree: room.stateTree && typeof room.stateTree === "object" ? room.stateTree : {},
     story: {
       globalSummary: String(storyPayload.globalSummary || "").trim(),
       segments: Array.isArray(storyPayload.segments)
@@ -288,6 +289,10 @@ export const normalizeMainStoryPayload = (room: RoomLike, groupedActions: Action
 };
 
 export const normalizeStateProcessorPayload = (room: RoomLike, parsed: { changes?: unknown[] } | null) => {
+  const statePatchRaw = (parsed as any)?.statePatch ?? (parsed as any)?.状态补丁 ?? (parsed as any)?.stateTreePatch;
+  const statePatch = statePatchRaw && typeof statePatchRaw === "object" && !Array.isArray(statePatchRaw)
+    ? statePatchRaw as Record<string, unknown>
+    : undefined;
   const changes = Array.isArray(parsed?.changes)
     ? parsed.changes
         .map((item) => {
@@ -304,5 +309,5 @@ export const normalizeStateProcessorPayload = (room: RoomLike, parsed: { changes
           return false;
         })
     : [];
-  return { changes };
+  return { changes, statePatch };
 };

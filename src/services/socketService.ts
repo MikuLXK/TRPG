@@ -69,6 +69,18 @@ class SocketService {
     this.socket?.emit("submit_action", { roomId, action });
   }
 
+  applyPublicStatePatch(args: { roomId: string; patch: Record<string, unknown>; reason?: string }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: "Socket 未连接" });
+        return;
+      }
+      this.socket.emit("apply_public_state_patch", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "公共状态写入无响应" });
+      });
+    });
+  }
+
   setRoomStreamingMode(roomId: string, mode: "off" | "provider") {
     this.socket?.emit("set_room_streaming_mode", { roomId, mode });
   }

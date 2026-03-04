@@ -161,7 +161,7 @@ export const runStateProcessor = async (room: RoomLike, storyPayload: MainStoryP
     userPrompt: promptEnvelope.userPrompt,
     modelPrompt: promptEnvelope.modelPrompt
   });
-  return normalizeStateProcessorPayload(room, safeJsonParse<{ changes?: unknown[] }>(output));
+  return normalizeStateProcessorPayload(room, safeJsonParse<{ changes?: unknown[]; statePatch?: Record<string, unknown> }>(output));
 };
 
 export const runMemorySummary = async (args: {

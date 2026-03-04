@@ -1,12 +1,12 @@
-import React from 'react';
 import { 角色信息 } from '../../types/gameData';
-import { Shield, Zap, Heart, User, Activity } from 'lucide-react';
+import { Zap, Heart, User, Activity } from 'lucide-react';
 
 interface CharacterPanelProps {
   角色: 角色信息;
+  玩家序号?: number;
 }
 
-export default function CharacterPanel({ 角色 }: CharacterPanelProps) {
+export default function CharacterPanel({ 角色, 玩家序号 }: CharacterPanelProps) {
   return (
     <div className="h-full flex flex-col bg-transparent border-r border-zinc-800 p-4 overflow-y-auto no-scrollbar relative">
       {/* Decorative Corner */}
@@ -16,6 +16,13 @@ export default function CharacterPanel({ 角色 }: CharacterPanelProps) {
         <div className="w-24 h-24 mx-auto bg-zinc-800 rounded-full border-2 border-amber-500/50 flex items-center justify-center mb-3 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
            <User size={40} className="text-zinc-400" />
         </div>
+        {Number.isFinite(Number(玩家序号)) && Number(玩家序号) > 0 && (
+          <div className="mb-2 flex justify-center">
+            <span className="inline-flex items-center h-6 px-2 rounded-md border border-cyan-500/40 bg-cyan-950/40 text-cyan-300 text-[11px] font-semibold tracking-wide">
+              玩家{Math.floor(Number(玩家序号))}
+            </span>
+          </div>
+        )}
         <h2 className="text-2xl font-bold text-amber-400 font-serif tracking-wider">{角色.姓名}</h2>
         <p className="text-cyan-600 text-sm font-bold uppercase tracking-widest">{角色.职业} LV.{角色.等级}</p>
       </div>

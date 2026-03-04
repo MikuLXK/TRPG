@@ -6,7 +6,7 @@ interface SkillsViewProps {
 }
 
 export default function SkillsView({ currentRole }: SkillsViewProps) {
-  const list = currentRole?.技能列表 || [];
+  const list = Array.isArray(currentRole?.技能列表) ? currentRole.技能列表 : [];
   return (
     <div className="space-y-3">
       {list.length === 0 ? (
@@ -16,7 +16,11 @@ export default function SkillsView({ currentRole }: SkillsViewProps) {
           <DataRow
             key={`${skill.技能ID}-${idx}`}
             label={skill.名称}
-            value={`${skill.分类} / ${skill.伤害类型}\n${skill.描述 || '无描述'}`}
+            value={[
+              `${skill.分类} / ${skill.伤害类型}｜ID：${skill.技能ID}`,
+              `消耗：${skill.消耗类型} ${skill.消耗数值}｜冷却：${skill.当前冷却}/${skill.冷却回合}`,
+              skill.描述 || '无描述'
+            ].join('\n')}
           />
         ))
       )}

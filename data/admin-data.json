@@ -34,7 +34,7 @@
       "createdAt": 1772456101383,
       "status": "active",
       "role": "player",
-      "lastLoginAt": 1772619002909
+      "lastLoginAt": 1772636445999
     },
     {
       "uid": "00005",
@@ -43,7 +43,7 @@
       "createdAt": 1772456113982,
       "status": "active",
       "role": "player",
-      "lastLoginAt": 1772456113982
+      "lastLoginAt": 1772625554916
     }
   ],
   "scripts": [
@@ -676,6 +676,30 @@
   "workshopScripts": [],
   "cloudSaves": [],
   "logs": [
+    {
+      "id": "1772636445999-6g10i0",
+      "timestamp": 1772636445999,
+      "operator": "1",
+      "action": "player_login",
+      "targetType": "user",
+      "targetId": "1"
+    },
+    {
+      "id": "1772635095404-76x14i",
+      "timestamp": 1772635095404,
+      "operator": "1",
+      "action": "player_login",
+      "targetType": "user",
+      "targetId": "1"
+    },
+    {
+      "id": "1772625554916-w1vlmz",
+      "timestamp": 1772625554916,
+      "operator": "2",
+      "action": "player_login",
+      "targetType": "user",
+      "targetId": "2"
+    },
     {
       "id": "1772619002909-ula9mf",
       "timestamp": 1772619002909,

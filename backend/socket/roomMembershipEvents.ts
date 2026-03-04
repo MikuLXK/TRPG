@@ -32,6 +32,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
   const ensureRoomMemory = (room: any) => {
     if (!room.memoryConfig) room.memoryConfig = createDefaultRoomMemoryConfig();
     if (!room.memorySystem) room.memorySystem = createEmptyRoomMemorySystem();
+    if (!room.stateTree || typeof room.stateTree !== "object") room.stateTree = {};
     if (typeof room.memoryPendingTask === "undefined") {
       room.memoryPendingTask = buildMemoryTask(room.memorySystem, room.memoryConfig);
     }
@@ -163,6 +164,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       functionRotationIndex: { actionCollector: 0, mainStory: 0, stateProcessor: 0 },
       emptySince: null,
       script,
+      stateTree: {},
       accountSlotMap: data.accountUsername ? { [normalizeAccountKey(data.accountUsername)]: hostSlot } : {},
       memoryConfig: createDefaultRoomMemoryConfig(),
       memorySystem: createEmptyRoomMemorySystem(),

@@ -139,6 +139,31 @@ const deepMergeValue = (base: unknown, patch: unknown): unknown => {
   return next;
 };
 
+const PUBLIC_STATE_COMMAND_PATTERN = /^\/(?:公共写入|pub|statepatch)\s+([\s\S]+)$/i;
+
+const parseJsonMaybeFenced = (value: string): AnyRecord | null => {
+  const source = String(value || "").trim();
+  if (!source) return null;
+  const unfenced = source.startsWith("```")
+    ? source.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim()
+    : source;
+  try {
+    const parsed = JSON.parse(unfenced);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const extractPublicStatePatchCommand = (text: string) => {
+  const trimmed = String(text || "").trim();
+  const match = trimmed.match(PUBLIC_STATE_COMMAND_PATTERN);
+  if (!match) return null;
+  const patch = parseJsonMaybeFenced(String(match[1] || ""));
+  if (!patch) return { ok: false as const, error: "公共写入命令格式错误，示例：/公共写入 {\"剧情\":{\"当前回合总述\":\"...\"}}" };
+  return { ok: true as const, patch };
+};
+
 const normalizeGameLog = (value: any): 游戏日志 | null => {
   const sender = String(value?.['发送者'] ?? value?.sender ?? '').trim();
   const content = String(value?.['内容'] ?? value?.content ?? '').trim();
@@ -312,6 +337,7 @@ const syncGameDataFromRoom = (
   accountUsername: string
 ) => {
   if (!room) return prev;
+  const baseData = isRecord(room?.stateTree) ? (deepMergeValue(prev, room.stateTree) as 游戏状态) : prev;
   const roomPlayers = Array.isArray(room.players) ? room.players : [];
   const mappedRoles: 玩家角色[] = roomPlayers.map((player: any, index: number) => mapRoomPlayerToSaveRole(player, roleTemplates, index));
   const selfPlayer = resolveSelfPlayer(roomPlayers, accountUsername);
@@ -322,35 +348,35 @@ const syncGameDataFromRoom = (
       slotToRole.set(role.玩家序号, role);
     }
   });
-  const nextRound = Number.isFinite(Number(room.currentRound)) ? Math.max(1, Math.floor(Number(room.currentRound))) : prev.环境.当前回合;
-  const nextLocation = selfRole?.位置 || prev.环境.具体地点 || '';
+  const nextRound = Number.isFinite(Number(room.currentRound)) ? Math.max(1, Math.floor(Number(room.currentRound))) : baseData.环境.当前回合;
+  const nextLocation = selfRole?.位置 || baseData.环境.具体地点 || '';
 
   const nextData: 游戏状态 = {
-    ...prev,
+    ...baseData,
     环境: {
-      ...prev.环境,
+      ...baseData.环境,
       当前回合: nextRound,
       具体地点: nextLocation
     },
     角色: {
-      ...prev.角色,
+      ...baseData.角色,
       玩家角色列表: mappedRoles,
-      当前主控角色ID: selfRole?.玩家ID || prev.角色.当前主控角色ID
+      当前主控角色ID: selfRole?.玩家ID || baseData.角色.当前主控角色ID
     },
     玩家1: slotToRole.get(1) || null,
     玩家2: slotToRole.get(2) || null,
     玩家3: slotToRole.get(3) || null,
     玩家4: slotToRole.get(4) || null,
     剧情: {
-      ...prev.剧情,
+      ...baseData.剧情,
       当前章节: {
-        ...prev.剧情.当前章节,
-        标题: prev.剧情.当前章节.标题 || room?.script?.title || '',
-        背景: prev.剧情.当前章节.背景 || room?.script?.description || ''
+        ...baseData.剧情.当前章节,
+        标题: baseData.剧情.当前章节.标题 || room?.script?.title || '',
+        背景: baseData.剧情.当前章节.背景 || room?.script?.description || ''
       },
       主线目标: {
-        ...prev.剧情.主线目标,
-        最终目标: prev.剧情.主线目标.最终目标 || room?.script?.finalGoal || ''
+        ...baseData.剧情.主线目标,
+        最终目标: baseData.剧情.主线目标.最终目标 || room?.script?.finalGoal || ''
       }
     },
     记忆系统: 规范化记忆系统(room?.memorySystem)
@@ -472,6 +498,13 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       游戏数据.角色.玩家角色列表[0];
     return toCharacterInfo(currentRole, roomState?.script?.description || '');
   }, [游戏数据.角色, roomState?.script?.description]);
+  const currentPlayerSlot = useMemo<number>(() => {
+    const currentId = 游戏数据.角色.当前主控角色ID;
+    const currentRole =
+      游戏数据.角色.玩家角色列表.find((role: 玩家角色) => role.玩家ID === currentId || role.角色ID === currentId) ||
+      游戏数据.角色.玩家角色列表[0];
+    return Number(currentRole?.玩家序号 || 0);
+  }, [游戏数据.角色]);
 
   const worldInfo = useMemo<游戏世界观>(() => {
     return buildWorldInfoFromTree(游戏数据, roomState?.script);
@@ -623,6 +656,10 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
 
   const aiStepText = useMemo(() => {
     const streamText = streamingMode === 'provider' ? '流式：跟随API提供者' : '流式：关闭';
+    const openingRoundRaw = Number(roomState?.script?.opening?.openingStory?.round);
+    const openingRound = Number.isFinite(openingRoundRaw) && openingRoundRaw > 0 ? Math.floor(openingRoundRaw) : 1;
+    const hasInputProgress = playerInputStates.some((item) => item.isReady || Boolean(item.action));
+    const isOpeningScene = (roomStatus === 'playing' || roomStatus === 'waiting') && currentRound === openingRound && !hasInputProgress;
     switch (roomStatus) {
       case 'processing':
         return `AI步骤 1/3：收集并分组玩家行动（${streamText}）`;
@@ -633,9 +670,18 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       case 'playing':
       case 'waiting':
       default:
-        return `等待玩家输入（第 ${currentRound} 回合，${streamText}）`;
+        return isOpeningScene
+          ? `开场剧情已加载，等待玩家输入（第 ${currentRound} 回合，${streamText}）`
+          : `等待玩家输入（第 ${currentRound} 回合，${streamText}）`;
     }
-  }, [roomStatus, currentRound, streamingMode]);
+  }, [roomStatus, currentRound, streamingMode, roomState?.script?.opening?.openingStory?.round, playerInputStates]);
+
+  const isOpeningScene = useMemo(() => {
+    const openingRoundRaw = Number(roomState?.script?.opening?.openingStory?.round);
+    const openingRound = Number.isFinite(openingRoundRaw) && openingRoundRaw > 0 ? Math.floor(openingRoundRaw) : 1;
+    const hasInputProgress = playerInputStates.some((item) => item.isReady || Boolean(item.action));
+    return (roomStatus === 'playing' || roomStatus === 'waiting') && currentRound === openingRound && !hasInputProgress;
+  }, [roomState?.script?.opening?.openingStory?.round, playerInputStates, roomStatus, currentRound]);
 
   const roomStatusZh = useMemo(() => {
     switch (roomStatus) {
@@ -662,6 +708,46 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
   };
 
   const handleSendMessage = (text: string) => {
+    const patchCommand = extractPublicStatePatchCommand(text);
+    if (patchCommand) {
+      if (!roomState?.id) return;
+      if (!patchCommand.ok) {
+        const warnLog: 游戏日志 = {
+          id: `${Date.now()}-pubpatch-error`,
+          发送者: '系统',
+          内容: patchCommand.error,
+          类型: '系统',
+          时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        set游戏数据((prev) => ({
+          ...prev,
+          日志列表: [...prev.日志列表, warnLog]
+        }));
+        return;
+      }
+      void (async () => {
+        const result = await socketService.applyPublicStatePatch({
+          roomId: roomState.id,
+          patch: patchCommand.patch,
+          reason: '前端前缀命令'
+        });
+        if (!result.ok) {
+          const errLog: 游戏日志 = {
+            id: `${Date.now()}-pubpatch-fail`,
+            发送者: '系统',
+            内容: `公共状态写入失败：${result.error || '未知错误'}`,
+            类型: '系统',
+            时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          set游戏数据((prev) => ({
+            ...prev,
+            日志列表: [...prev.日志列表, errLog]
+          }));
+        }
+      })();
+      return;
+    }
+
     if (isReady) return;
 
     const newLog: 游戏日志 = {
@@ -792,7 +878,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       <main className="flex-1 min-h-0 flex items-stretch justify-center overflow-hidden relative p-4">
         <div className="w-full h-full max-h-full flex border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl bg-black">
           <div className="w-[280px] flex-shrink-0 z-20 bg-black relative">
-            <CharacterPanel 角色={currentPlayerInfo} />
+            <CharacterPanel 角色={currentPlayerInfo} 玩家序号={currentPlayerSlot} />
           </div>
 
           <div className="flex-1 flex flex-col min-w-0 z-10 relative bg-zinc-900/50 p-3">
@@ -811,6 +897,8 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
                 playerInputStates={playerInputStates}
                 selfSpeakerNames={selfSpeakerNames}
                 aiThinkingHistory={Array.isArray(roomState?.aiThinkingHistory) ? roomState.aiThinkingHistory : []}
+                currentGameTimeText={worldInfo.当前时间}
+                isOpeningScene={isOpeningScene}
                 streamingMode={streamingMode}
                 onToggleStreamingMode={handleToggleStreamingMode}
               />
@@ -838,7 +926,12 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
         </div>
       </main>
 
-      <Footer onlineCount={roomState?.players?.length || 1} />
+      <Footer
+        onlineCount={roomState?.players?.length || 1}
+        roomStatusText={roomStatusZh}
+        currentRound={currentRound}
+        centerText={aiStepText}
+      />
 
       <SettingsModal
         isOpen={isSettingsOpen}

@@ -1,5 +1,31 @@
 import type { ScriptDefinition, ScriptOpeningConfig } from "../../src/types/Script";
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const deepMergeValue = (base: unknown, patch: unknown): unknown => {
+  if (Array.isArray(patch)) {
+    return patch.map((item) => deepMergeValue(undefined, item));
+  }
+  if (!isRecord(patch)) return patch;
+  const next: Record<string, unknown> = isRecord(base) ? { ...base } : {};
+  for (const key of Object.keys(patch)) {
+    next[key] = deepMergeValue(isRecord(base) ? base[key] : undefined, patch[key]);
+  }
+  return next;
+};
+
+const OPENING_PUBLIC_STATE_ROOT_KEYS = new Set(["环境", "社交", "战斗", "剧情", "任务列表", "约定列表", "记忆系统"]);
+
+const pickPublicStatePatch = (value: unknown): Record<string, unknown> | null => {
+  if (!isRecord(value)) return null;
+  const next: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (!OPENING_PUBLIC_STATE_ROOT_KEYS.has(key)) continue;
+    next[key] = value[key];
+  }
+  return Object.keys(next).length > 0 ? next : null;
+};
+
 const sanitizeStoryLine = (value: unknown) => {
   const speaker = String((value as any)?.speaker || "").trim();
   const text = String((value as any)?.text || "").trim();
@@ -252,11 +278,17 @@ export const registerCharacterSetupEvents = (socket: any, deps: {
     let openingLog: any = null;
     if (opening && opening.enabled !== false) {
       (room.script as ScriptDefinition).opening = opening;
+      if (room.gameSetupMode !== "load_save") {
+        const patch = pickPublicStatePatch(opening.initialState);
+        if (patch) {
+          room.stateTree = deepMergeValue(isRecord(room.stateTree) ? room.stateTree : {}, patch) as Record<string, unknown>;
+        }
+      }
       const openingRound = Number(opening.openingStory.round);
       if (Number.isFinite(openingRound) && openingRound > 0) {
         room.currentRound = Math.floor(openingRound);
       }
-      const openingLocation = String((opening.initialState as any)?.环境?.具体地点 || "").trim();
+      const openingLocation = String((room.stateTree as any)?.环境?.具体地点 || (opening.initialState as any)?.环境?.具体地点 || "").trim();
       if (openingLocation) {
         room.players.forEach((player: any) => {
           player.location = openingLocation;

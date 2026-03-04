@@ -109,6 +109,7 @@ export interface RoomLike {
     approvals: string[];
     rejections: string[];
   } | null;
+  stateTree?: Record<string, unknown>;
 }
 
 export interface ActionCollectorRawAction {
@@ -161,4 +162,5 @@ export interface StateProcessorPayload {
     fields: Record<string, unknown>;
     reason: string;
   }>;
+  statePatch?: Record<string, unknown>;
 }

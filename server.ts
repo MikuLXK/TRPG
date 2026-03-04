@@ -155,6 +155,7 @@ interface Room {
   functionRotationIndex: Record<AIFunctionType, number>;
   emptySince: number | null;
   script: ScriptDefinition;
+  stateTree: Record<string, unknown>;
   accountSlotMap: Record<string, number>;
   memoryConfig: ReturnType<typeof createDefaultRoomMemoryConfig>;
   memorySystem: ReturnType<typeof createEmptyRoomMemorySystem>;
@@ -720,6 +721,35 @@ const createEmptyAttributes = (): CharacterAttributeBlock => ({
   魅力: 0
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const deepMergeValue = (base: unknown, patch: unknown): unknown => {
+  if (Array.isArray(patch)) {
+    return patch.map((item) => deepMergeValue(undefined, item));
+  }
+  if (!isRecord(patch)) return patch;
+  const next: Record<string, unknown> = isRecord(base) ? { ...base } : {};
+  for (const key of Object.keys(patch)) {
+    next[key] = deepMergeValue(isRecord(base) ? base[key] : undefined, patch[key]);
+  }
+  return next;
+};
+
+const RUNTIME_PUBLIC_STATE_ROOT_KEYS = new Set(["环境", "剧情", "任务列表", "约定列表", "记忆系统"]);
+
+const pickPublicStatePatch = (
+  value: unknown,
+  allowedRoots: Set<string> = RUNTIME_PUBLIC_STATE_ROOT_KEYS
+): Record<string, unknown> | null => {
+  if (!isRecord(value)) return null;
+  const next: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (!allowedRoots.has(key)) continue;
+    next[key] = value[key];
+  }
+  return Object.keys(next).length > 0 ? next : null;
+};
+
 const createDefaultCharacterProfile = (template: ScriptRoleTemplate): PlayerCharacterProfile => ({
   characterName: "",
   selectedClassId: template.classOptions[0]?.id || null,
@@ -883,6 +913,14 @@ const applyStateChanges = (room: Room, changesInput: unknown) => {
     createEmptyAttributes,
     syncPlayerCombatStats
   });
+  const statePatchRaw =
+    (changesInput as any)?.statePatch ??
+    (changesInput as any)?.状态补丁 ??
+    (changesInput as any)?.stateTreePatch;
+  const publicPatch = pickPublicStatePatch(statePatchRaw);
+  if (publicPatch) {
+    room.stateTree = deepMergeValue(isRecord(room.stateTree) ? room.stateTree : {}, publicPatch) as Record<string, unknown>;
+  }
 };
 
 const syncHostIfNeeded = (room: Room) => {

@@ -23,6 +23,27 @@ export const registerTurnEvents = (socket: any, deps: {
   normalizeRoomMemorySystem: (raw?: any) => any;
   buildMemoryTask: (memoryBase: any, configBase: any) => any;
 }) => {
+  const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const deepMergeValue = (base: unknown, patch: unknown): unknown => {
+    if (Array.isArray(patch)) return patch.map((item) => deepMergeValue(undefined, item));
+    if (!isRecord(patch)) return patch;
+    const next: Record<string, unknown> = isRecord(base) ? { ...base } : {};
+    for (const key of Object.keys(patch)) {
+      next[key] = deepMergeValue(isRecord(base) ? base[key] : undefined, patch[key]);
+    }
+    return next;
+  };
+  const MANUAL_PUBLIC_STATE_ROOT_KEYS = new Set(["环境", "社交", "战斗", "剧情", "任务列表", "约定列表", "记忆系统"]);
+  const pickCommandPublicPatch = (value: unknown): Record<string, unknown> | null => {
+    if (!isRecord(value)) return null;
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      if (!MANUAL_PUBLIC_STATE_ROOT_KEYS.has(key)) continue;
+      next[key] = value[key];
+    }
+    return Object.keys(next).length > 0 ? next : null;
+  };
+
   const getVoteStatusByPlayer = (room: any) => {
     const vote = room?.rerollVote;
     const players = deps.getActivePlayers(room);
@@ -127,6 +148,51 @@ export const registerTurnEvents = (socket: any, deps: {
     room.streamingMode = mode === "provider" ? "provider" : "off";
     deps.io.to(roomId).emit("room_updated", room);
   });
+
+  socket.on(
+    "apply_public_state_patch",
+    (
+      {
+        roomId,
+        patch,
+        reason
+      }: {
+        roomId: string;
+        patch: Record<string, unknown>;
+        reason?: string;
+      },
+      callback?: (payload: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      const publicPatch = pickCommandPublicPatch(patch);
+      if (!publicPatch) {
+        callback?.({ ok: false, error: "补丁无效：缺少可写入的公共根路径" });
+        return;
+      }
+      room.stateTree = deepMergeValue(isRecord(room.stateTree) ? room.stateTree : {}, publicPatch) as Record<string, unknown>;
+      const summary = String(reason || "").trim() || "前端前缀命令写入";
+      const newLog = {
+        id: `${Date.now()}-pubpatch`,
+        发送者: "系统",
+        内容: `公共状态已更新（${summary}）：${Object.keys(publicPatch).join("、")}`,
+        类型: "系统",
+        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      };
+      room.logs.push(newLog);
+      deps.io.to(roomId).emit("new_log", newLog);
+      deps.io.to(roomId).emit("room_updated", room);
+      callback?.({ ok: true });
+    }
+  );
 
   socket.on("chat_message", ({ roomId, message }: { roomId: string; message: string }) => {
     const room = deps.rooms[roomId];

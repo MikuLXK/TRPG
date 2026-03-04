@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react';
 import { 游戏日志 } from '../../types/gameData';
-import { Send, Waves, Ban, Brain, X } from 'lucide-react';
+import { Send, Waves, Ban, Brain, X, Compass, FileCode2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface GameLogPanelProps {
@@ -27,6 +27,8 @@ interface GameLogPanelProps {
     source?: 'mainStory' | 'reroll' | string;
     time?: string;
   }>;
+  currentGameTimeText?: string;
+  isOpeningScene?: boolean;
   streamingMode?: 'off' | 'provider';
   onToggleStreamingMode?: () => void;
 }
@@ -58,8 +60,16 @@ interface DisplayEntry {
 
 const TITLE_LINE_PATTERN = /^【[^】]+】\|【[^】]+】$/;
 const TAG_LINE_PATTERN = /^【([^】]+)】\s*(.*)$/;
+const GAME_TIME_PATTERN_A = /\d{1,6}年\d{2}月\d{2}日\s+\d{2}:\d{2}/;
+const GAME_TIME_PATTERN_B = /^\d{1,6}:\d{2}:\d{2}:\d{2}:\d{2}$/;
 
 const normalizeName = (value: string) => String(value || '').trim().toLowerCase();
+const isLikelyGameTime = (value: string) => GAME_TIME_PATTERN_A.test(value) || GAME_TIME_PATTERN_B.test(value);
+const resolveDisplayTime = (raw: string, currentGameTimeText: string) => {
+  const source = String(raw || '').trim();
+  if (source && isLikelyGameTime(source)) return source;
+  return String(currentGameTimeText || '').trim() || source || '--:--';
+};
 
 const tryParseStoryPayload = (raw: string): StoryPayload | null => {
   const source = String(raw || '').trim();
@@ -224,22 +234,31 @@ export default function GameLogPanel({
   totalPlayers = 0,
   isStreaming = false,
   streamPreview = '',
-  roomStatus = '等待中',
+  roomStatus: _roomStatus = '等待中',
   currentRound = 1,
-  aiStepText = '等待玩家输入',
+  aiStepText: _aiStepText = '等待玩家输入',
   playerInputStates = [],
   selfSpeakerNames = [],
   aiThinkingHistory = [],
+  currentGameTimeText = '',
+  isOpeningScene = false,
   streamingMode = 'provider',
   onToggleStreamingMode,
 }: GameLogPanelProps) {
   const [inputText, setInputText] = useState('');
   const [showThinkingModal, setShowThinkingModal] = useState(false);
+  const [showRawModal, setShowRawModal] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const selfSpeakerSet = useMemo(() => new Set(selfSpeakerNames.map(normalizeName).filter(Boolean)), [selfSpeakerNames]);
   const displayEntries = useMemo(
-    () => 日志列表.flatMap((log) => parseLogToEntries(log, selfSpeakerSet)),
-    [日志列表, selfSpeakerSet]
+    () =>
+      日志列表
+        .flatMap((log) => parseLogToEntries(log, selfSpeakerSet))
+        .map((entry) => ({
+          ...entry,
+          time: resolveDisplayTime(entry.time, currentGameTimeText)
+        })),
+    [日志列表, selfSpeakerSet, currentGameTimeText]
   );
   const thinkingEntries = useMemo(
     () =>
@@ -248,6 +267,16 @@ export default function GameLogPanel({
         .reverse(),
     [aiThinkingHistory]
   );
+  const roundRawLogs = useMemo(() => {
+    const systemLogs = 日志列表
+      .filter((log) => log.发送者 === '系统' && String(log.内容 || '').trim())
+      .filter((log) => log.类型 === '旁白' || log.类型 === '系统');
+    if (systemLogs.length === 0) return [];
+    if (isOpeningScene) return systemLogs.slice(0, 3);
+    const preferred = [...systemLogs].reverse().filter((log) => !String(log.内容 || '').startsWith('状态结算:'));
+    if (preferred.length > 0) return preferred.slice(0, 3);
+    return [...systemLogs].reverse().slice(0, 3);
+  }, [日志列表, isOpeningScene]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -270,6 +299,7 @@ export default function GameLogPanel({
   };
 
   const waitingText = totalPlayers > 0 ? `已提交 ${readyCount}/${totalPlayers}，等待其他玩家...` : '行动已提交，等待其他玩家...';
+  const roundLabel = isOpeningScene ? `开场剧情 · 第 ${currentRound} 回合` : `第 ${currentRound} 回合`;
 
   return (
     <div className="h-full flex flex-col bg-zinc-950 relative overflow-hidden">
@@ -278,46 +308,31 @@ export default function GameLogPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar z-10" ref={scrollRef}>
-        <div className="rounded-xl border border-zinc-800/90 bg-zinc-900/65 px-3 py-2 text-xs text-zinc-300">
-          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+        <div className="px-1 py-1 text-xs text-zinc-300">
+          <div className="flex items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => setShowThinkingModal(true)}
-              className="h-7 w-7 rounded-full border border-cyan-700/70 text-cyan-300 hover:bg-cyan-900/30 flex items-center justify-center"
+              className="inline-flex items-center justify-center h-7 px-2.5 rounded-lg border border-cyan-500/45 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 shadow-[0_0_10px_rgba(34,211,238,0.12)]"
               title="查看AI思考"
             >
               <Brain size={13} />
             </button>
 
-            <div className="flex justify-center">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-amber-500/45 bg-amber-500/10 text-amber-300 font-semibold text-[11px] tracking-wide">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                第 {currentRound} 回合
-              </div>
+            <div className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.15)]">
+              <Compass size={13} />
+              <span className="text-[11px] font-semibold tracking-wide">{roundLabel}</span>
             </div>
 
-            <div className="justify-self-end text-[11px] text-zinc-400">状态：{roomStatus}</div>
+            <button
+              type="button"
+              onClick={() => setShowRawModal(true)}
+              className="inline-flex items-center justify-center h-7 px-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
+              title="查看本回合AI原始响应"
+            >
+              <FileCode2 size={12} />
+            </button>
           </div>
-
-          <div className="mt-1.5 text-[11px] text-cyan-300/90 text-center truncate">{aiStepText}</div>
-
-          {playerInputStates.length > 0 && (
-            <div className="mt-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              {playerInputStates.map((player) => (
-                <div
-                  key={player.id}
-                  className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] ${
-                    player.isReady
-                      ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300'
-                      : 'border-zinc-700 bg-zinc-900 text-zinc-500'
-                  }`}
-                >
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${player.isReady ? 'bg-emerald-400' : 'bg-zinc-500'}`}></span>
-                  <span>{player.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <AnimatePresence>
@@ -401,6 +416,28 @@ export default function GameLogPanel({
       </div>
 
       <div className="p-3 bg-zinc-900 border-t border-zinc-800 z-20">
+        {playerInputStates.length > 0 && (
+          <div className="mb-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            {playerInputStates.map((player) => {
+              const actionPreview = player.action ? (player.action.length > 12 ? `${player.action.slice(0, 12)}...` : player.action) : '';
+              return (
+                <div
+                  key={player.id}
+                  className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] ${
+                    player.isReady
+                      ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300'
+                      : 'border-zinc-700 bg-zinc-900 text-zinc-500'
+                  }`}
+                >
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${player.isReady ? 'bg-emerald-400' : 'bg-zinc-500'}`}></span>
+                  <span>{player.name}</span>
+                  {actionPreview && <span className="text-zinc-500">· {actionPreview}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {isReady && (
           <div className="flex items-center justify-center gap-2 text-xs text-amber-500 animate-pulse mb-2">
             <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
@@ -429,7 +466,7 @@ export default function GameLogPanel({
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isReady}
-            placeholder={isReady ? '等待回合结束...' : '输入你的行动...'}
+            placeholder={isReady ? '等待回合结束...' : '输入你的行动（公共写入：/公共写入 {"剧情":{...}}）'}
             className="flex-1 bg-transparent text-zinc-200 px-2 py-1 h-full resize-none focus:outline-none text-sm custom-scrollbar placeholder:text-zinc-600 leading-tight disabled:cursor-not-allowed"
           />
           <button
@@ -447,6 +484,7 @@ export default function GameLogPanel({
           <div className="absolute -top-1 -right-1 w-2 h-2 border-t border-r border-amber-500/50 rounded-tr-md pointer-events-none"></div>
           <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b border-l border-amber-500/50 rounded-bl-md pointer-events-none"></div>
         </div>
+
       </div>
 
       {showThinkingModal && (
@@ -483,6 +521,35 @@ export default function GameLogPanel({
                     </div>
                   );
                 })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRawModal && (
+        <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl h-[76%] bg-zinc-950 border border-amber-700/50 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/70 flex items-center justify-between">
+              <div className="text-amber-300 font-bold tracking-wider">本回合AI原始响应</div>
+              <button
+                type="button"
+                onClick={() => setShowRawModal(false)}
+                className="p-2 rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+              {roundRawLogs.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-sm text-zinc-500">当前回合暂无可展示的原始响应</div>
+              ) : (
+                roundRawLogs.map((log) => (
+                  <div key={log.id} className="rounded-xl border border-zinc-700/70 bg-zinc-900/70 p-3">
+                    <div className="text-xs text-amber-300/90 mb-2">{log.时间戳} · {log.类型}</div>
+                    <pre className="text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed font-mono">{String(log.内容 || '')}</pre>
+                  </div>
+                ))
               )}
             </div>
           </div>

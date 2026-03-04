@@ -117,6 +117,50 @@ class SocketService {
     this.socket?.emit("memory_summary_dismiss", { roomId, taskId });
   }
 
+  saveToSlot(args: { roomId: string; slotType: 'manual' | 'auto'; slotIndex: number; note?: string }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("save_to_slot", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "存档请求无响应" });
+      });
+    });
+  }
+
+  requestSaveSlots(roomId: string) {
+    this.socket?.emit("request_save_slots", { roomId });
+  }
+
+  requestLoadVote(args: { roomId: string; slotType: 'manual' | 'auto'; slotIndex: number }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("request_load_vote", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "读档投票请求无响应" });
+      });
+    });
+  }
+
+  respondLoadVote(args: { roomId: string; approve: boolean }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("respond_load_vote", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "读档投票无响应" });
+      });
+    });
+  }
+
+  cancelLoadVote(roomId: string) {
+    this.socket?.emit("cancel_load_vote", { roomId });
+  }
+
   requestReroll(args: { roomId: string; prompt?: string }) {
     return new Promise<{ ok: boolean; error?: string }>((resolve) => {
       if (!this.socket) {

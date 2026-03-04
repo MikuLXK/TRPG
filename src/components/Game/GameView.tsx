@@ -860,6 +860,31 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     socketService.cancelRerollVote(roomState.id);
   };
 
+  const 保存到手动槽位 = async (slotIndex: number, note?: string) => {
+    if (!roomState?.id) return { ok: false, error: '房间不存在' };
+    return socketService.saveToSlot({ roomId: roomState.id, slotType: 'manual', slotIndex, note });
+  };
+
+  const 请求存档槽位 = () => {
+    if (!roomState?.id) return;
+    socketService.requestSaveSlots(roomState.id);
+  };
+
+  const 发起读档投票 = async (slotType: 'manual' | 'auto', slotIndex: number) => {
+    if (!roomState?.id) return { ok: false, error: '房间不存在' };
+    return socketService.requestLoadVote({ roomId: roomState.id, slotType, slotIndex });
+  };
+
+  const 投票读档 = async (approve: boolean) => {
+    if (!roomState?.id) return { ok: false, error: '房间不存在' };
+    return socketService.respondLoadVote({ roomId: roomState.id, approve });
+  };
+
+  const 取消读档投票 = () => {
+    if (!roomState?.id) return;
+    socketService.cancelLoadVote(roomState.id);
+  };
+
   const actionLogs = 游戏数据.日志列表.filter((log) => log.类型 !== 'OOC');
   const chatLogs = 游戏数据.日志列表.filter((log) => log.类型 === 'OOC');
   const memorySystem: 记忆系统结构 = useMemo(
@@ -921,6 +946,11 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
               onRequestReroll={发起重Roll}
               onRespondReroll={投票重Roll}
               onCancelReroll={取消重Roll}
+              onSaveToSlot={保存到手动槽位}
+              onRequestSaveSlots={请求存档槽位}
+              onRequestLoadVote={发起读档投票}
+              onRespondLoadVote={投票读档}
+              onCancelLoadVote={取消读档投票}
             />
           </div>
         </div>

@@ -26,6 +26,8 @@ export interface MemorySettingsConfig {
   即时记忆上限: number;
   短期记忆阈值: number;
   中期记忆阈值: number;
+  即时记忆注入条数: number;
+  短期记忆注入条数: number;
   短期转中期提示词: string;
   中期转长期提示词: string;
 }
@@ -130,6 +132,8 @@ export const defaultSettings: GameSettings = {
     即时记忆上限: 10,
     短期记忆阈值: 30,
     中期记忆阈值: 50,
+    即时记忆注入条数: 8,
+    短期记忆注入条数: 12,
     短期转中期提示词: defaultMemoryPrompts.短期转中期提示词,
     中期转长期提示词: defaultMemoryPrompts.中期转长期提示词
   }

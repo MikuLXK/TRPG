@@ -96,6 +96,65 @@ const mergeSettings = (base: GameSettings, saved: Partial<GameSettings>): GameSe
 
 const getDefaultEndpointByProvider = (provider: AIProviderType) => providerEndpointMap[provider] ?? '';
 
+const API_CONNECTION_BACKUP_KEY = 'trpg_api_connection_backup_v1';
+
+const persistApiConnectionBackup = (settings: GameSettings) => {
+  try {
+    const payload = {
+      defaultProvider: settings.ai.defaultProvider,
+      defaultEndpoint: settings.ai.defaultEndpoint,
+      defaultApiKey: settings.ai.defaultApiKey,
+      actionCollector: settings.ai.actionCollector.connection,
+      mainStory: settings.ai.mainStory.connection,
+      stateProcessor: settings.ai.stateProcessor.connection,
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(API_CONNECTION_BACKUP_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore write failures
+  }
+};
+
+const mergeApiConnectionBackup = (base: GameSettings): GameSettings => {
+  try {
+    const raw = localStorage.getItem(API_CONNECTION_BACKUP_KEY);
+    if (!raw) return base;
+    const payload = JSON.parse(raw) as any;
+    return {
+      ...base,
+      ai: {
+        ...base.ai,
+        defaultProvider: payload?.defaultProvider ?? base.ai.defaultProvider,
+        defaultEndpoint: payload?.defaultEndpoint ?? base.ai.defaultEndpoint,
+        defaultApiKey: payload?.defaultApiKey ?? base.ai.defaultApiKey,
+        actionCollector: {
+          ...base.ai.actionCollector,
+          connection: {
+            ...base.ai.actionCollector.connection,
+            ...(payload?.actionCollector || {})
+          }
+        },
+        mainStory: {
+          ...base.ai.mainStory,
+          connection: {
+            ...base.ai.mainStory.connection,
+            ...(payload?.mainStory || {})
+          }
+        },
+        stateProcessor: {
+          ...base.ai.stateProcessor,
+          connection: {
+            ...base.ai.stateProcessor.connection,
+            ...(payload?.stateProcessor || {})
+          }
+        }
+      }
+    };
+  } catch {
+    return base;
+  }
+};
+
 export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', onExitToHome, roomId, accountUsername = '' }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [settings, setSettings] = useState<GameSettings>(deepCloneSettings(defaultSettings));
@@ -153,6 +212,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
         nextSettings = mergeSettings(nextSettings, savedSettings as Partial<GameSettings>);
       }
 
+      nextSettings = mergeApiConnectionBackup(nextSettings);
       setSettings(nextSettings);
     } catch {
       showToast('加载设置失败，已使用默认配置', 'error');
@@ -167,6 +227,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
       } else {
         await dbService.saveSetting('gameSettings', settings);
       }
+      persistApiConnectionBackup(settings);
       if (roomId) {
         socketService.updatePlayerAIConfig(roomId, settings.ai);
         socketService.updateRoomMemoryConfig(roomId, settings.memory);
@@ -800,6 +861,10 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
         </div>
       </div>
 
+      <div className="rounded-lg border border-emerald-700/30 bg-emerald-950/10 px-3 py-2 text-xs text-emerald-200">
+        API 连接配置启用双重持久化：账号/本地设置 + 浏览器本地备份。即使切换房间或重启页面也会自动回填。
+      </div>
+
       <div className="flex justify-end pt-4 border-t border-zinc-800">
         <button onClick={onSave} className="flex items-center gap-2 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-zinc-950 rounded-lg font-bold transition-colors shadow-lg shadow-amber-900/20">
           <Save size={16} /> 保存连接配置
@@ -859,6 +924,39 @@ function MemorySettings({
                 onChange((prev) => ({ ...prev, memory: { ...prev.memory, 中期记忆阈值: value } }));
               }}
               className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
+            />
+          </SettingItem>
+        </div>
+      </Section>
+
+      <Section title="上下文注入配置（滑块）">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <SettingItem label={`即时记忆注入条数: ${settings.memory.即时记忆注入条数}`}>
+            <input
+              type="range"
+              min={0}
+              max={30}
+              step={1}
+              value={settings.memory.即时记忆注入条数}
+              onChange={(e) => {
+                const value = Math.max(0, Math.min(30, Number(e.target.value) || 0));
+                onChange((prev) => ({ ...prev, memory: { ...prev.memory, 即时记忆注入条数: value } }));
+              }}
+              className="w-full"
+            />
+          </SettingItem>
+          <SettingItem label={`短期记忆注入条数: ${settings.memory.短期记忆注入条数}`}>
+            <input
+              type="range"
+              min={0}
+              max={40}
+              step={1}
+              value={settings.memory.短期记忆注入条数}
+              onChange={(e) => {
+                const value = Math.max(0, Math.min(40, Number(e.target.value) || 0));
+                onChange((prev) => ({ ...prev, memory: { ...prev.memory, 短期记忆注入条数: value } }));
+              }}
+              className="w-full"
             />
           </SettingItem>
         </div>

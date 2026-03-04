@@ -36,6 +36,8 @@ export const 规范化记忆配置 = (raw?: Partial<MemorySettingsConfig> | null
   即时记忆上限: Math.max(3, Number(raw?.即时记忆上限) || 10),
   短期记忆阈值: Math.max(5, Number(raw?.短期记忆阈值) || 30),
   中期记忆阈值: Math.max(20, Number(raw?.中期记忆阈值) || 50),
+  即时记忆注入条数: Math.max(0, Math.min(30, Number(raw?.即时记忆注入条数) || 8)),
+  短期记忆注入条数: Math.max(0, Math.min(40, Number(raw?.短期记忆注入条数) || 12)),
   短期转中期提示词: String(raw?.短期转中期提示词 || '').trim(),
   中期转长期提示词: String(raw?.中期转长期提示词 || '').trim()
 });

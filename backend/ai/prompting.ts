@@ -173,8 +173,12 @@ const buildSystemPromptForFunction = async (args: {
     if (category.startsWith("00_身份")) {
       parts.push(categoryText || buildIdentityFallback(args.functionType, templateValues));
     } else if (category.includes("世界观")) {
-      parts.push(categoryText);
-      if (scriptSettingPrompt) parts.push(scriptSettingPrompt);
+      // 世界观改为严格跟随所选剧本，不再注入内置世界观文本。
+      if (scriptSettingPrompt) {
+        parts.push(scriptSettingPrompt);
+      } else {
+        parts.push("当前剧本未提供世界观设定，请基于运行时上下文与既有状态谨慎推进。\n禁止臆造超出已知范围的世界观硬设定。");
+      }
     } else if (category.startsWith("99_")) {
       parts.push(categoryText);
       if (systemPromptOverride) parts.push(systemPromptOverride);

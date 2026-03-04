@@ -1,4 +1,5 @@
 import { buildMemoryTask, createDefaultRoomMemoryConfig, createEmptyRoomMemorySystem } from "../turn/memory";
+import { createRoomSaveSlots, normalizeRoomSaveSlots } from "../turn/saveSlots";
 
 export const registerRoomMembershipEvents = (socket: any, deps: {
   rooms: Record<string, any>;
@@ -39,6 +40,8 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
     if (!Array.isArray(room.aiThinkingHistory)) room.aiThinkingHistory = [];
     if (typeof room.lastTurnSnapshot === "undefined") room.lastTurnSnapshot = null;
     if (typeof room.rerollVote === "undefined") room.rerollVote = null;
+    room.saveSlots = normalizeRoomSaveSlots(room.saveSlots);
+    if (typeof room.loadVote === "undefined") room.loadVote = null;
   };
 
   const collectUsedSlots = (room: any) => {
@@ -172,6 +175,8 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       aiThinkingHistory: [],
       lastTurnSnapshot: null,
       rerollVote: null,
+      saveSlots: createRoomSaveSlots(),
+      loadVote: null,
       sharedAssets: {
         script: {
           assetType: "script",

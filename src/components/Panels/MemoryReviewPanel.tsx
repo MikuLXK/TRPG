@@ -33,16 +33,15 @@ export default function MemoryReviewPanel({
   const list = useMemo(() => {
     if (activeTab === '即时') {
       return memorySystem.即时记忆
-        .map((item, index) => ({ id: `immediate-${index}`, ...拆分即时与短期(item) }))
-        .reverse();
+        .map((item, index) => ({ id: `immediate-${index}`, ...拆分即时与短期(item) }));
     }
     if (activeTab === '短期') {
-      return memorySystem.短期记忆.map((item, index) => ({ id: `short-${index}`, text: item })).reverse();
+      return memorySystem.短期记忆.map((item, index) => ({ id: `short-${index}`, text: item }));
     }
     if (activeTab === '中期') {
-      return memorySystem.中期记忆.map((item, index) => ({ id: `mid-${index}`, text: item })).reverse();
+      return memorySystem.中期记忆.map((item, index) => ({ id: `mid-${index}`, text: item }));
     }
-    return memorySystem.长期记忆.map((item, index) => ({ id: `long-${index}`, text: item })).reverse();
+    return memorySystem.长期记忆.map((item, index) => ({ id: `long-${index}`, text: item }));
   }, [activeTab, memorySystem]);
 
   return (

@@ -19,6 +19,11 @@ interface RightPanelProps {
   onRequestReroll: (prompt: string) => Promise<{ ok: boolean; error?: string }>;
   onRespondReroll: (approve: boolean) => Promise<{ ok: boolean; error?: string }>;
   onCancelReroll: () => void;
+  onSaveToSlot: (slotIndex: number, note?: string) => Promise<{ ok: boolean; error?: string }>;
+  onRequestSaveSlots: () => void;
+  onRequestLoadVote: (slotType: 'manual' | 'auto', slotIndex: number) => Promise<{ ok: boolean; error?: string }>;
+  onRespondLoadVote: (approve: boolean) => Promise<{ ok: boolean; error?: string }>;
+  onCancelLoadVote: () => void;
 }
 
 export default function RightPanel({
@@ -35,7 +40,12 @@ export default function RightPanel({
   selfPlayerId = '',
   onRequestReroll,
   onRespondReroll,
-  onCancelReroll
+  onCancelReroll,
+  onSaveToSlot,
+  onRequestSaveSlots,
+  onRequestLoadVote,
+  onRespondLoadVote,
+  onCancelLoadVote
 }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'menu'>('menu');
 
@@ -81,6 +91,11 @@ export default function RightPanel({
             onRequestReroll={onRequestReroll}
             onRespondReroll={onRespondReroll}
             onCancelReroll={onCancelReroll}
+            onSaveToSlot={onSaveToSlot}
+            onRequestSaveSlots={onRequestSaveSlots}
+            onRequestLoadVote={onRequestLoadVote}
+            onRespondLoadVote={onRespondLoadVote}
+            onCancelLoadVote={onCancelLoadVote}
           />
         )}
       </div>

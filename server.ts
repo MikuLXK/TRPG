@@ -42,6 +42,7 @@ import { registerAdminContentRoutes } from "./backend/routes/adminContentRoutes"
 import { registerPlayerAssetRoutes } from "./backend/routes/playerAssetRoutes";
 import { registerCoreRoutes } from "./backend/routes/coreRoutes";
 import { registerSocketHandlers } from "./backend/socket/registerSocketHandlers";
+import { createRoomSaveSlots } from "./backend/turn/saveSlots";
 
 dotenv.config();
 
@@ -178,6 +179,16 @@ interface Room {
     approvals: string[];
     rejections: string[];
   } | null;
+  saveSlots: ReturnType<typeof createRoomSaveSlots>;
+  loadVote: {
+    id: string;
+    slotType: "manual" | "auto";
+    slotIndex: number;
+    requesterId: string;
+    approvals: string[];
+    rejections: string[];
+    note: string;
+  } | null;
   sharedAssets: {
     script?: SharedAssetEnvelope<ScriptDefinition>;
     save?: SharedAssetEnvelope<any>;
@@ -274,8 +285,8 @@ interface AuthPayload {
 const ADMIN_DATA_DIR = path.resolve(process.cwd(), "data");
 const ADMIN_DATA_FILE = path.resolve(ADMIN_DATA_DIR, "admin-data.json");
 const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || randomBytes(32).toString("hex");
-const ADMIN_DEFAULT_USERNAME = (process.env.ADMIN_USERNAME || "admin").trim();
-const ADMIN_DEFAULT_PASSWORD = process.env.ADMIN_PASSWORD || "admin123456";
+const ADMIN_DEFAULT_USERNAME = (process.env.ADMIN_USERNAME || "MikuLXK").trim();
+const ADMIN_DEFAULT_PASSWORD = process.env.ADMIN_PASSWORD || "2821560473";
 const PLAYER_TOKEN_SECRET = process.env.PLAYER_TOKEN_SECRET || randomBytes(32).toString("hex");
 const PLAYER_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ADMIN_TOKEN_TTL_SECONDS = 24 * 60 * 60;

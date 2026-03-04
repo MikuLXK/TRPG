@@ -4,7 +4,8 @@ import AgreementsView from './actionMenu/AgreementsView';
 import InventoryView from './actionMenu/InventoryView';
 import MemoryView from './actionMenu/MemoryView';
 import ModalShell from './actionMenu/ModalShell';
-import RerollView from './actionMenu/RerollView';
+import SaveLoadView from './actionMenu/SaveLoadView';
+import VoteCenterView from './actionMenu/VoteCenterView';
 import SkillsView from './actionMenu/SkillsView';
 import SocialView from './actionMenu/SocialView';
 import StoryView from './actionMenu/StoryView';
@@ -26,6 +27,11 @@ interface ActionMenuPanelProps {
   onRequestReroll: (prompt: string) => Promise<{ ok: boolean; error?: string }>;
   onRespondReroll: (approve: boolean) => Promise<{ ok: boolean; error?: string }>;
   onCancelReroll: () => void;
+  onSaveToSlot: (slotIndex: number, note?: string) => Promise<{ ok: boolean; error?: string }>;
+  onRequestSaveSlots: () => void;
+  onRequestLoadVote: (slotType: 'manual' | 'auto', slotIndex: number) => Promise<{ ok: boolean; error?: string }>;
+  onRespondLoadVote: (approve: boolean) => Promise<{ ok: boolean; error?: string }>;
+  onCancelLoadVote: () => void;
 }
 
 export default function ActionMenuPanel({
@@ -40,7 +46,12 @@ export default function ActionMenuPanel({
   selfPlayerId,
   onRequestReroll,
   onRespondReroll,
-  onCancelReroll
+  onCancelReroll,
+  onSaveToSlot,
+  onRequestSaveSlots,
+  onRequestLoadVote,
+  onRespondLoadVote,
+  onCancelLoadVote
 }: ActionMenuPanelProps) {
   const [openModal, setOpenModal] = useState<ActionMenuModal | null>(null);
   const currentRole = useMemo(() => resolveCurrentRole(gameData), [gameData]);
@@ -66,14 +77,28 @@ export default function ActionMenuPanel({
         />
       );
     }
+    if (openModal === 'saveLoad') {
+      return (
+        <SaveLoadView
+          saveSlots={roomState?.saveSlots || null}
+          loadVote={roomState?.loadVote || null}
+          onSaveToSlot={onSaveToSlot}
+          onRequestSaveSlots={onRequestSaveSlots}
+          onRequestLoadVote={onRequestLoadVote}
+        />
+      );
+    }
     return (
-      <RerollView
+      <VoteCenterView
         players={players}
         rerollVote={roomState?.rerollVote || null}
+        loadVote={roomState?.loadVote || null}
         selfPlayerId={selfPlayerId}
         onRequestReroll={onRequestReroll}
         onRespondReroll={onRespondReroll}
         onCancelReroll={onCancelReroll}
+        onRespondLoadVote={onRespondLoadVote}
+        onCancelLoadVote={onCancelLoadVote}
       />
     );
   };

@@ -1,4 +1,5 @@
 import { applyMemorySummary, buildMemorySummaryUserPrompt, cleanupSummaryOutput } from "../turn/memory";
+import { applyRoomSnapshot, findRoomSaveSlot, normalizeRoomSaveSlots, writeRoomSaveSlot } from "../turn/saveSlots";
 import { composeStoryByPlayer } from "../turn/storyDispatch";
 
 export const registerTurnEvents = (socket: any, deps: {
@@ -66,6 +67,30 @@ export const registerTurnEvents = (socket: any, deps: {
     if (!Array.isArray(room.aiThinkingHistory)) room.aiThinkingHistory = [];
     if (typeof room.lastTurnSnapshot === "undefined") room.lastTurnSnapshot = null;
     if (typeof room.rerollVote === "undefined") room.rerollVote = null;
+  };
+
+  const emitSaveSlotsUpdate = (roomId: string, room: any) => {
+    deps.io.to(roomId).emit("save_slots_updated", {
+      saveSlots: room?.saveSlots || normalizeRoomSaveSlots(),
+      loadVote: room?.loadVote || null
+    });
+  };
+
+  const emitLoadVoteUpdate = (roomId: string, room: any) => {
+    const vote = room?.loadVote;
+    const players = deps.getActivePlayers(room).map((p: any) => ({
+      playerId: p.id,
+      playerName: p.name,
+      status: vote?.approvals?.includes(p.id) ? "approved" : vote?.rejections?.includes(p.id) ? "rejected" : "pending"
+    }));
+    deps.io.to(roomId).emit("load_vote_updated", { vote: vote || null, players });
+    emitSaveSlotsUpdate(roomId, room);
+    deps.io.to(roomId).emit("room_updated", room);
+  };
+
+  const ensureSaveLoadState = (room: any) => {
+    room.saveSlots = normalizeRoomSaveSlots(room?.saveSlots);
+    if (typeof room.loadVote === "undefined") room.loadVote = null;
   };
 
   const executeReroll = async (roomId: string, room: any) => {
@@ -220,6 +245,10 @@ export const registerTurnEvents = (socket: any, deps: {
       socket.emit("error", "重Roll投票进行中，请先完成投票");
       return;
     }
+    if (room.loadVote) {
+      socket.emit("error", "读档投票进行中，请先完成投票");
+      return;
+    }
     if (player.isReady) return;
 
     player.action = action;
@@ -251,6 +280,200 @@ export const registerTurnEvents = (socket: any, deps: {
     room.memorySystem = deps.normalizeRoomMemorySystem(room.memorySystem);
     room.memoryPendingTask = deps.buildMemoryTask(room.memorySystem, room.memoryConfig);
     deps.io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on(
+    "save_to_slot",
+    (
+      {
+        roomId,
+        slotType,
+        slotIndex,
+        note
+      }: {
+        roomId: string;
+        slotType: "manual" | "auto";
+        slotIndex: number;
+        note?: string;
+      },
+      callback?: (payload: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      if (slotType !== "manual") {
+        callback?.({ ok: false, error: "仅允许手动槽位保存" });
+        return;
+      }
+      ensureSaveLoadState(room);
+      writeRoomSaveSlot({
+        room,
+        slots: room.saveSlots,
+        slotType,
+        slotIndex,
+        savedBy: String(player.name || ""),
+        note: String(note || "").trim()
+      });
+      emitSaveSlotsUpdate(roomId, room);
+      deps.io.to(roomId).emit("room_updated", room);
+      callback?.({ ok: true });
+    }
+  );
+
+  socket.on("request_save_slots", ({ roomId }: { roomId: string }) => {
+    const room = deps.rooms[roomId];
+    if (!room) return;
+    const player = room.players.find((p: any) => p.id === socket.id);
+    if (!player) return;
+    ensureSaveLoadState(room);
+    emitSaveSlotsUpdate(roomId, room);
+    deps.io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on(
+    "request_load_vote",
+    (
+      {
+        roomId,
+        slotType,
+        slotIndex
+      }: {
+        roomId: string;
+        slotType: "manual" | "auto";
+        slotIndex: number;
+      },
+      callback?: (payload: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      ensureSaveLoadState(room);
+      if (room.rerollVote) {
+        callback?.({ ok: false, error: "重Roll投票进行中，暂不能读档" });
+        return;
+      }
+      if (room.loadVote) {
+        callback?.({ ok: false, error: "已有读档投票进行中" });
+        return;
+      }
+      const target = findRoomSaveSlot(room.saveSlots, slotType, slotIndex);
+      if (!target?.snapshot) {
+        callback?.({ ok: false, error: "该槽位没有可读档快照" });
+        return;
+      }
+      room.loadVote = {
+        id: `load-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        slotType,
+        slotIndex,
+        requesterId: socket.id,
+        approvals: [socket.id],
+        rejections: [],
+        note: String(target.note || "").trim()
+      };
+      emitLoadVoteUpdate(roomId, room);
+      const active = deps.getActivePlayers(room);
+      callback?.({ ok: true });
+      if (active.length <= 1) {
+        applyRoomSnapshot(room, target.snapshot);
+        room.loadVote = null;
+        emitLoadVoteUpdate(roomId, room);
+        deps.io.emit("rooms_list_updated");
+      }
+    }
+  );
+
+  socket.on(
+    "respond_load_vote",
+    (
+      {
+        roomId,
+        approve
+      }: {
+        roomId: string;
+        approve: boolean;
+      },
+      callback?: (payload: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      ensureSaveLoadState(room);
+      const vote = room.loadVote;
+      if (!vote) {
+        callback?.({ ok: false, error: "当前没有进行中的读档投票" });
+        return;
+      }
+      const hasVoted = vote.approvals.includes(socket.id) || vote.rejections.includes(socket.id);
+      if (hasVoted) {
+        callback?.({ ok: false, error: "你已经投过票" });
+        return;
+      }
+      if (approve) vote.approvals.push(socket.id);
+      else vote.rejections.push(socket.id);
+
+      if (vote.rejections.length > 0) {
+        room.loadVote = null;
+        emitLoadVoteUpdate(roomId, room);
+        callback?.({ ok: true });
+        return;
+      }
+
+      const activePlayerIds = deps.getActivePlayers(room).map((p: any) => p.id);
+      const allApproved = activePlayerIds.every((id: string) => vote.approvals.includes(id));
+      if (!allApproved) {
+        emitLoadVoteUpdate(roomId, room);
+        callback?.({ ok: true });
+        return;
+      }
+
+      const target = findRoomSaveSlot(room.saveSlots, vote.slotType, vote.slotIndex);
+      if (!target?.snapshot) {
+        room.loadVote = null;
+        emitLoadVoteUpdate(roomId, room);
+        callback?.({ ok: false, error: "目标存档不存在或已损坏" });
+        return;
+      }
+      applyRoomSnapshot(room, target.snapshot);
+      room.loadVote = null;
+      emitLoadVoteUpdate(roomId, room);
+      deps.io.to(roomId).emit("turn_progress", { readyCount: 0, total: deps.getActivePlayers(room).length });
+      deps.io.emit("rooms_list_updated");
+      callback?.({ ok: true });
+    }
+  );
+
+  socket.on("cancel_load_vote", ({ roomId }: { roomId: string }) => {
+    const room = deps.rooms[roomId];
+    if (!room) return;
+    const player = room.players.find((p: any) => p.id === socket.id);
+    if (!player) return;
+    ensureSaveLoadState(room);
+    const vote = room.loadVote;
+    if (!vote) return;
+    if (vote.requesterId !== socket.id && room.hostId !== socket.id) return;
+    room.loadVote = null;
+    emitLoadVoteUpdate(roomId, room);
   });
 
   socket.on(
@@ -290,6 +513,11 @@ export const registerTurnEvents = (socket: any, deps: {
       }
       if (room.rerollVote) {
         callback?.({ ok: false, error: "已有重Roll投票进行中" });
+        return;
+      }
+      ensureSaveLoadState(room);
+      if (room.loadVote) {
+        callback?.({ ok: false, error: "已有读档投票进行中" });
         return;
       }
       const voteId = `reroll-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

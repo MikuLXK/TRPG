@@ -175,11 +175,16 @@ export const buildMainStoryInput = (
     }))
     .filter((item) => item.content);
   const memory = room.memorySystem || {};
+  const memoryConfig = room.memoryConfig && typeof room.memoryConfig === "object"
+    ? room.memoryConfig as Record<string, unknown>
+    : {};
+  const immediateInjectCount = Math.max(0, Math.min(30, Number(memoryConfig.immediateInjectCount ?? memoryConfig["即时记忆注入条数"]) || 8));
+  const shortInjectCount = Math.max(0, Math.min(40, Number(memoryConfig.shortInjectCount ?? memoryConfig["短期记忆注入条数"]) || 12));
   const memoryContext = {
     长期记忆: Array.isArray((memory as any).长期记忆) ? (memory as any).长期记忆.slice(-8) : [],
     中期记忆: Array.isArray((memory as any).中期记忆) ? (memory as any).中期记忆.slice(-10) : [],
-    短期记忆: Array.isArray((memory as any).短期记忆) ? (memory as any).短期记忆.slice(-12) : [],
-    即时记忆: Array.isArray((memory as any).即时记忆) ? (memory as any).即时记忆.slice(-8) : []
+    短期记忆: Array.isArray((memory as any).短期记忆) ? (memory as any).短期记忆.slice(-shortInjectCount) : [],
+    即时记忆: Array.isArray((memory as any).即时记忆) ? (memory as any).即时记忆.slice(-immediateInjectCount) : []
   };
   return {
     phase: "main_story",

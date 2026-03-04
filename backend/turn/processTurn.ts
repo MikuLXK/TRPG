@@ -5,6 +5,7 @@ import {
   normalizeRoomMemorySystem,
   writeRoomMemory
 } from "./memory";
+import { writeAutoRoomSave } from "./saveSlots";
 import { composeStoryByPlayer } from "./storyDispatch";
 
 interface StorySegmentLike {
@@ -68,6 +69,7 @@ export const createTurnProcessor = (deps: {
       }
       const groupedActions = await deps.runActionCollector(room);
       room.rerollVote = null;
+      room.loadVote = null;
       room.lastTurnSnapshot = {
         round: Number(room.currentRound) || 1,
         groupedActions: JSON.parse(JSON.stringify(groupedActions))
@@ -148,7 +150,17 @@ export const createTurnProcessor = (deps: {
         p.action = "";
       });
 
+      if (room.saveSlots) {
+        writeAutoRoomSave({
+          room,
+          slots: room.saveSlots,
+          savedBy: "系统",
+          note: `第${Math.max(1, Number(room.currentRound) - 1)}回合自动存档`
+        });
+      }
+
       deps.io.to(roomId).emit("turn_progress", { readyCount: 0, total: deps.getActivePlayers(room).length });
+      deps.io.to(roomId).emit("save_slots_updated", { saveSlots: room.saveSlots, loadVote: room.loadVote || null });
       deps.io.to(roomId).emit("room_updated", room);
       deps.io.to(roomId).emit("round_complete", { room, story: globalSummary || "回合处理完成。" });
       deps.io.emit("rooms_list_updated");

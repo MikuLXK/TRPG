@@ -6,9 +6,10 @@ import {
   ClipboardList,
   UserRound,
   Brain,
-  RotateCcw,
   BookOpen,
-  Handshake
+  Handshake,
+  HardDriveDownload,
+  Vote
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -21,7 +22,8 @@ export type ActionMenuModal =
   | 'story'
   | 'agreements'
   | 'memory'
-  | 'reroll';
+  | 'saveLoad'
+  | 'voteCenter';
 
 export interface ActionMenuOption {
   id: ActionMenuModal | 'settings';
@@ -39,7 +41,8 @@ export const ACTION_MENU_OPTIONS: ActionMenuOption[] = [
   { id: 'story', label: '剧情追踪', icon: BookOpen, description: '查看章节、线索与事件状态' },
   { id: 'agreements', label: '约定列表', icon: Handshake, description: '查看约定结构条目' },
   { id: 'memory', label: '记忆回顾', icon: Brain, description: '查看即时/短期/中期/长期记忆' },
-  { id: 'reroll', label: '重Roll', icon: RotateCcw, description: '发起并确认重Roll投票' },
+  { id: 'saveLoad', label: '存档中心', icon: HardDriveDownload, description: '查看5手动/5自动槽位并发起读档投票' },
+  { id: 'voteCenter', label: '投票中心', icon: Vote, description: '统一处理重Roll与读档投票' },
   { id: 'settings', label: '系统设置', icon: Settings, description: '调整显示、提示词和连接配置' }
 ];
 
@@ -52,5 +55,6 @@ export const ACTION_MENU_MODAL_TITLE: Record<ActionMenuModal, string> = {
   story: '剧情追踪',
   agreements: '约定列表',
   memory: '记忆回顾',
-  reroll: '重Roll'
+  saveLoad: '存档中心',
+  voteCenter: '投票中心'
 };

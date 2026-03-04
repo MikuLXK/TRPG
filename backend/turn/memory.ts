@@ -4,6 +4,8 @@ export interface RoomMemoryConfig {
   immediateLimit: number;
   shortThreshold: number;
   midThreshold: number;
+  immediateInjectCount: number;
+  shortInjectCount: number;
   shortToMidPrompt: string;
   midToLongPrompt: string;
 }
@@ -77,6 +79,8 @@ export const createDefaultRoomMemoryConfig = (): RoomMemoryConfig => ({
   immediateLimit: 10,
   shortThreshold: 30,
   midThreshold: 50,
+  immediateInjectCount: 8,
+  shortInjectCount: 12,
   shortToMidPrompt: `你负责将“短期记忆”压缩为“中期记忆”。
 要求：
 1. 保留关键事实：地点变化、人物关系变化、关键冲突、阶段性结果。
@@ -95,12 +99,16 @@ export const normalizeRoomMemoryConfig = (raw?: Partial<RoomMemoryConfig> | null
   const immediateRaw = source.immediateLimit ?? source["即时记忆上限"];
   const shortRaw = source.shortThreshold ?? source["短期记忆阈值"];
   const midRaw = source.midThreshold ?? source["中期记忆阈值"];
+  const immediateInjectRaw = source.immediateInjectCount ?? source["即时记忆注入条数"];
+  const shortInjectRaw = source.shortInjectCount ?? source["短期记忆注入条数"];
   const shortPromptRaw = source.shortToMidPrompt ?? source["短期转中期提示词"];
   const midPromptRaw = source.midToLongPrompt ?? source["中期转长期提示词"];
   return {
     immediateLimit: Math.max(3, Number(immediateRaw) || defaults.immediateLimit),
     shortThreshold: Math.max(5, Number(shortRaw) || defaults.shortThreshold),
     midThreshold: Math.max(20, Number(midRaw) || defaults.midThreshold),
+    immediateInjectCount: Math.max(0, Math.min(30, Number(immediateInjectRaw) || defaults.immediateInjectCount)),
+    shortInjectCount: Math.max(0, Math.min(40, Number(shortInjectRaw) || defaults.shortInjectCount)),
     shortToMidPrompt: String(shortPromptRaw || defaults.shortToMidPrompt).trim(),
     midToLongPrompt: String(midPromptRaw || defaults.midToLongPrompt).trim()
   };

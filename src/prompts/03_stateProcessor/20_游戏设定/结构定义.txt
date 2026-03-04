@@ -1,0 +1,256 @@
+<数据结构定义>
+# 结构定义
+
+> 目标：为本项目提供可执行的数据树，AI 仅能按本结构写入。
+> 原则：先确认路径存在，再确认字段类型，再执行最小命令。
+> 防幻觉：不存在字段绝不写；已删除字段绝不复活。
+
+## 0. 防幻觉硬约束（强制）
+- 只允许写入本协议出现的路径和字段。
+- 不存在路径禁止写入。
+- 字段缺失时：
+  - 不臆造历史字段补位；
+  - 允许空字符串、空数组或 null；
+  - 下一回合再补合法字段。
+
+## 1. SaveData 总树（概览）
+TRPGSaveData
+├─ 环境
+├─ 角色
+├─ 玩家1
+├─ 玩家2
+├─ 玩家3
+├─ 玩家4
+├─ 社交
+├─ 战斗
+├─ 剧情
+├─ 任务列表
+└─ 约定列表
+
+## 2. 环境结构（环境）
+环境
+├─ 年: number
+├─ 月: number
+├─ 日: number
+├─ 时: number
+├─ 分: number
+├─ 星期: string
+├─ 游戏天数: number
+├─ 当前回合: number
+├─ 大地点: string
+├─ 中地点: string
+├─ 小地点: string
+├─ 具体地点: string
+├─ 天气: { 类型: string, 强度: string, 结束时间: string(YYYY:MM:DD:HH:MM) } | null
+├─ 场景标签: string[]
+└─ 环境效果: Array<{ 名称:string, 描述:string, 效果:string, 剩余回合:number }>
+
+## 3. 角色结构（角色）
+角色
+├─ 玩家角色列表: Array<角色.玩家角色[i]>
+└─ 当前主控角色ID: string
+
+命令路径约束（强制）：
+- 变量命令操作优先使用顶层路径：`玩家1.*`、`玩家2.*`、`玩家3.*`、`玩家4.*`。
+- `玩家1~玩家4` 与 `角色.玩家角色列表` 必须语义一致，按 `玩家序号` 一一对应。
+
+### 3.1 角色.玩家角色[i]
+角色.玩家角色[i]
+├─ 玩家序号: number(1~4)
+├─ 角色ID: string
+├─ 玩家ID: string
+├─ 玩家名: string
+├─ 角色名: string
+├─ 职业: string
+├─ 种族: string
+├─ 性别: string
+├─ 背景: string
+├─ 等级: number
+├─ 当前经验: number
+├─ 升级经验: number
+├─ 位置: string
+├─ 当前生命值: number
+├─ 最大生命值: number
+├─ 当前法力值: number
+├─ 最大法力值: number
+├─ 属性: { 力量:number, 敏捷:number, 体质:number, 智力:number, 感知:number, 魅力:number }
+├─ 状态效果: string[]
+├─ 装备: { 头部:string, 胸部:string, 手部:string, 腿部:string, 足部:string, 主手:string, 副手:string, 饰品:string }
+├─ 物品列表: Array<角色.物品列表[i]>
+├─ 技能列表: Array<角色.技能列表[i]>
+└─ 玩家BUFF: Array<角色.玩家BUFF[i]>
+
+### 3.2 角色.物品列表[i]
+角色.物品列表[i]
+├─ 物品ID: string
+├─ 名称: string
+├─ 描述: string
+├─ 类型: string
+├─ 品质: string
+├─ 数量: number
+├─ 是否可堆叠: boolean
+├─ 重量: number
+├─ 价值: number
+├─ 当前耐久: number
+├─ 最大耐久: number
+├─ 可用次数: number
+├─ 装备槽位: string | null
+├─ 使用效果: string[]
+└─ 标签: string[]
+
+### 3.3 角色.技能列表[i]（功法改为魔法/技能）
+角色.技能列表[i]
+├─ 技能ID: string
+├─ 名称: string
+├─ 描述: string
+├─ 分类: "法术" | "战技" | "被动" | "职业技能" | "种族特性"
+├─ 品质: string
+├─ 等级需求: number
+├─ 消耗类型: "法力" | "体力" | "次数" | "无"
+├─ 消耗数值: number
+├─ 冷却回合: number
+├─ 当前冷却: number
+├─ 施放距离: string
+├─ 目标类型: string
+├─ 判定属性: string
+├─ 基础效果: string
+├─ 伤害类型: string
+├─ 伤害公式: string
+├─ 附加效果: string[]
+└─ 标签: string[]
+
+### 3.4 角色.玩家BUFF[i]
+角色.玩家BUFF[i]
+├─ BUFFID: string
+├─ 名称: string
+├─ 来源: string
+├─ 类型: "增益" | "减益" | "中性"
+├─ 描述: string
+├─ 层数: number
+├─ 持续回合: number
+├─ 剩余回合: number
+├─ 效果: string
+├─ 可驱散: boolean
+└─ 到期行为: string
+
+## 4. 社交（社交）
+社交
+└─ 关系列表: Array<社交[i]>
+
+### 4.1 社交[i]
+社交[i]
+├─ 关系ID: string
+├─ 对象ID: string
+├─ 对象名: string
+├─ 对象类型: "玩家" | "NPC" | "势力"
+├─ 是否队友: boolean
+├─ 关系状态: string
+├─ 好感度: number
+├─ 信任度: number
+├─ 态度: string
+├─ 当前地点: string
+├─ 简介: string
+├─ 已知信息: string[]
+└─ 记忆: Array<{ 内容:string, 时间:string, 来源:string }>
+
+### 4.2 索引规则（强制）
+- 只允许 社交.关系列表[i].字段。
+- 禁止 社交.对象名.字段。
+- i 必须是已存在索引。
+
+## 5. 战斗结构（战斗）
+战斗
+├─ 是否战斗中: boolean
+├─ 战斗ID: string | null
+├─ 战斗名称: string
+├─ 阶段: "未开始" | "准备" | "进行中" | "结算"
+├─ 当前回合: number
+├─ 战场: { 地点:string, 地形:string, 特殊规则:string[] }
+├─ 玩家方: Array<战斗.单位[i]>
+├─ 敌方: Array<战斗.单位[i]>
+├─ 中立方: Array<战斗.单位[i]>
+├─ 行动队列: Array<{ 单位ID:string, 先攻值:number, 是否已行动:boolean }>
+├─ 回合日志: Array<{ 回合:number, 事件:string, 结果:string }>
+└─ 胜负状态: "未分胜负" | "玩家胜利" | "玩家失败" | "撤离" | "中断"
+
+### 5.1 战斗.单位[i]
+战斗.单位[i]
+├─ 单位ID: string
+├─ 名称: string
+├─ 阵营: "玩家方" | "敌方" | "中立方"
+├─ 类型: "玩家" | "NPC" | "怪物"
+├─ 位置: string
+├─ 当前生命值: number
+├─ 最大生命值: number
+├─ 当前法力值: number
+├─ 最大法力值: number
+├─ 护甲值: number
+├─ 抗性: string[]
+├─ 易伤: string[]
+├─ 免疫: string[]
+├─ 状态效果: string[]
+├─ 可用技能ID列表: string[]
+└─ 备注: string
+
+## 6. 剧情结构（剧情）
+剧情
+├─ 当前章节: {
+│   章节ID:string,
+│   序号:number,
+│   标题:string,
+│   背景:string,
+│   当前阶段:string,
+│   目标:string[],
+│   失败条件:string[]
+│ }
+├─ 主线目标: {
+│   最终目标:string,
+│   当前进度:string,
+│   阶段目标:Array<{ 名称:string, 进度:string, 状态:string }>
+│ }
+├─ 当前回合总述: string
+├─ 分组叙事: Array<{ 分组ID:string, 可见玩家ID:string[], 标题:string, 内容:string }>
+├─ 玩家行动提示: Array<{ 玩家ID:string, 提示:string }>
+├─ 线索列表: Array<{ 线索ID:string, 标题:string, 内容:string, 来源:string, 状态:"未发现"|"已发现"|"已验证" }>
+├─ 待触发事件: Array<{ 事件ID:string, 名称:string, 描述:string, 触发条件:string, 失效条件:string, 状态:string }>
+├─ 已发生事件: Array<{ 事件ID:string, 名称:string, 内容:string, 影响:string, 时间:string }>
+└─ 历史卷宗: Array<{ 标题:string, 结语:string, 记录时间:string }>
+
+## 7. 任务列表
+任务列表[i]
+├─ 任务ID: string
+├─ 标题: string
+├─ 描述: string
+├─ 类型: "主线" | "支线" | "委托" | "探索" | "隐藏"
+├─ 发布者: string
+├─ 发布地点: string
+├─ 推荐等级: string
+├─ 当前状态: "未接取" | "进行中" | "已完成" | "已失败" | "已放弃"
+├─ 目标列表: Array<{ 目标ID:string, 描述:string, 进度:number, 目标值:number, 状态:string }>
+├─ 奖励: { 经验:number, 金币:number, 物品:string[], 声望:number }
+├─ 截止时间: string | null
+├─ 关联章节ID: string | null
+└─ 备注: string
+
+## 8. 约定列表
+约定列表[i]
+├─ 约定ID: string
+├─ 对象ID: string
+├─ 对象名: string
+├─ 性质: "盟约" | "交易" | "誓言" | "护送" | "停战" | "其他"
+├─ 标题: string
+├─ 约定内容: string
+├─ 约定地点: string
+├─ 约定时间: string
+├─ 生效条件: string
+├─ 当前状态: "未生效" | "生效中" | "已履行" | "已违约" | "已失效"
+├─ 履行奖励: string
+├─ 违约后果: string
+└─ 背景备注: string
+
+## 9. 协议边界
+- 本协议仅定义字段树、字段命名、字段类型。
+- 命令顺序、写入门禁、同步流程由独立协议处理。
+- 只允许最小改动写入，不允许无关字段批量覆盖。
+</数据结构定义>
+

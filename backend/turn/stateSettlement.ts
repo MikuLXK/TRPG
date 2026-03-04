@@ -26,8 +26,13 @@ export const applyStateChanges = (
   const changes = Array.isArray((changesInput as any)?.changes) ? (changesInput as any).changes : [];
   for (const change of changes) {
     const playerId = typeof change?.playerId === "string" ? change.playerId : "";
-    if (!playerId) continue;
-    const player = room.players.find((p) => p.id === playerId);
+    const rawPlayerSlot = Number(change?.playerSlot ?? change?.slot ?? 0);
+    const playerSlot = Number.isFinite(rawPlayerSlot) && rawPlayerSlot > 0 ? Math.floor(rawPlayerSlot) : 0;
+    const player = playerId
+      ? room.players.find((p) => p.id === playerId)
+      : playerSlot > 0
+        ? room.players.find((p: any) => Number((p as any).playerSlot) === playerSlot)
+        : undefined;
     if (!player) continue;
     const fields = (change?.fields && typeof change.fields === "object") ? change.fields as Record<string, unknown> : {};
 
@@ -78,4 +83,3 @@ export const applyStateChanges = (
     deps.syncPlayerCombatStats(player);
   }
 };
-

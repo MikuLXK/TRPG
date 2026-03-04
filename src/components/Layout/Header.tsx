@@ -1,5 +1,5 @@
 import React from 'react';
-import { 游戏世界观 } from '../../types/GameData';
+import { 游戏世界观 } from '../../types/gameData';
 import { Clock, MapPin, BookOpen, Hourglass } from 'lucide-react';
 
 interface HeaderProps {
@@ -51,3 +51,4 @@ export default function Header({ 世界信息 }: HeaderProps) {
     </header>
   );
 }
+

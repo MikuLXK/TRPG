@@ -1,0 +1,51 @@
+<输出结构与指令场景>
+# 主剧情AI输出协议（仅主剧情）
+
+## 0. 边界
+- 输出必须是单个 JSON 对象，不得输出解释文字。
+- 必须先在 thinking 中完成思考，再输出结构化结果。
+
+## 1. 顶层结构
+{
+  "thinking": string,
+  "round": number,
+  "publicLines": Line[],
+  "segments": Segment[]
+}
+
+Line:
+{
+  "speaker": string,
+  "text": string
+}
+
+Segment:
+{
+  "groupId": string,
+  "visibleToPlayerIds": string[],
+  "title": string,
+  "lines": Line[]
+}
+
+## 2. speaker 规则
+- 特殊 speaker 仅允许：`公共旁白`、`旁白`、`判定`。
+- `publicLines` 允许：`公共旁白` 或 NPC/角色名；禁止 `旁白`。
+- `segments[].lines` 允许：`旁白`、`判定`、NPC名、玩家名；禁止 `公共旁白`。
+
+## 3. 玩家台词解析规则（强制）
+- 仅提取玩家输入中双引号 `"..."` 内文本作为玩家台词。
+- 没有合法双引号台词时，禁止生成该玩家 `speaker=玩家名` 行。
+- 引号不成对视为无台词。
+- 引号外内容写入 `speaker="旁白"`。
+- 玩家台词不得凭空创造，仅允许轻微语气润色。
+
+## 4. 旁白与对话交错规则（强制）
+- `segments[].lines` 必须以 `旁白` 起句推进场景。
+- 对话与旁白需要交错推进。
+- 当玩家无合法台词时，使用 `旁白 + NPC反应/判定` 推进。
+
+## 5. 判定行
+- 判定统一 `speaker="判定"`。
+- `text` 格式：
+  `行动名称｜结果｜触发对象｜判定值X/难度Y｜说明`
+</输出结构与指令场景>

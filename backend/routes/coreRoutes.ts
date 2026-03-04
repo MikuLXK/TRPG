@@ -36,6 +36,7 @@ export const registerCoreRoutes = (deps: {
         content: script.content,
         settingPrompt: script.settingPrompt,
         finalGoal: script.finalGoal,
+        opening: script.opening,
         roleTemplates: script.roleTemplates
       }));
     res.json({ scripts });
@@ -145,4 +146,3 @@ export const registerCoreRoutes = (deps: {
     }
   });
 };
-

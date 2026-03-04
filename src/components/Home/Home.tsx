@@ -10,7 +10,7 @@ import JoinRoom from './JoinRoom/JoinRoom';
 import WorkshopCenter from './WorkshopCenter';
 import CloudSaveCenter from './CloudSaveCenter';
 import type { ScriptDefinition } from '../../types/Script';
-import type { 游戏状态 } from '../../types/GameData';
+import type { 游戏状态 } from '../../types/gameData';
 
 interface HomeProps {
   onJoinGame: (roomState: any) => void;
@@ -319,3 +319,4 @@ export default function Home({ onJoinGame, accountUsername, initialPlayerName = 
     </div>
   );
 }
+

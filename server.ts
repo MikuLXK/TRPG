@@ -13,6 +13,7 @@ import type {
   CharacterAttributeBlock,
   PlayerCharacterProfile,
   ScriptDefinition,
+  ScriptOpeningConfig,
   ScriptRoleTemplate
 } from "./src/types/Script";
 import {
@@ -86,6 +87,8 @@ interface SavedCharacter {
   id: string;
   name: string;
   roleTemplateId: string;
+  slotIndex: number;
+  preferredAccountUsername: string | null;
   profile: PlayerCharacterProfile;
   claimedBy: string | null;
 }
@@ -94,6 +97,7 @@ interface Player {
   id: string;
   name: string;
   accountUsername?: string;
+  playerSlot: number;
   isReady: boolean;
   action: string;
   location: string;
@@ -141,6 +145,7 @@ interface Room {
   functionRotationIndex: Record<AIFunctionType, number>;
   emptySince: number | null;
   script: ScriptDefinition;
+  accountSlotMap: Record<string, number>;
   sharedAssets: {
     script?: SharedAssetEnvelope<ScriptDefinition>;
     save?: SharedAssetEnvelope<any>;
@@ -387,8 +392,10 @@ const normalizeManagedScripts = (scripts: ManagedScript[]) => {
   createBuiltinManagedScripts().forEach((script) => byId.set(script.id, script));
   scripts.forEach((script) => {
     if (!script?.id) return;
+    const builtin = byId.get(script.id);
     byId.set(script.id, {
       ...script,
+      opening: script.opening ?? builtin?.opening,
       isPublished: script.isPublished ?? true,
       source: script.source ?? "admin",
       createdAt: Number.isFinite(script.createdAt) ? script.createdAt : Date.now(),
@@ -402,17 +409,129 @@ const findRuntimeScript = (scriptId: string) => {
   return adminState.scripts.find((script) => script.id === scriptId && script.isPublished);
 };
 
+const sanitizeScriptStoryLine = (value: unknown) => {
+  const speaker = String((value as any)?.speaker || "").trim();
+  const text = String((value as any)?.text || "").trim();
+  if (!speaker || !text) return null;
+  return { speaker, text };
+};
+
+const sanitizeScriptStorySegment = (value: unknown) => {
+  const groupId = String((value as any)?.groupId || "").trim();
+  const title = String((value as any)?.title || "").trim();
+  const visibleToPlayerIds = Array.isArray((value as any)?.visibleToPlayerIds)
+    ? (value as any).visibleToPlayerIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+    : undefined;
+  const lines = Array.isArray((value as any)?.lines)
+    ? (value as any).lines.map(sanitizeScriptStoryLine).filter((line): line is { speaker: string; text: string } => Boolean(line))
+    : [];
+  if (!groupId || !title || lines.length === 0) return null;
+  return { groupId, title, lines, visibleToPlayerIds };
+};
+
+const buildDefaultOpeningConfig = (input: { title: string; description: string; finalGoal: string }): ScriptOpeningConfig => {
+  const safeTitle = String(input.title || "未命名剧本").trim() || "未命名剧本";
+  const safeDescription = String(input.description || "").trim();
+  const safeFinalGoal = String(input.finalGoal || "").trim();
+  return {
+    enabled: true,
+    initialState: {
+      环境: {
+        年: 1,
+        月: 1,
+        日: 1,
+        时: 8,
+        分: 0,
+        星期: "",
+        游戏天数: 1,
+        当前回合: 1,
+        大地点: "",
+        中地点: "",
+        小地点: "",
+        具体地点: ""
+      },
+      剧情: {
+        当前章节: {
+          章节ID: "chapter-001",
+          序号: 1,
+          标题: `${safeTitle}·开局`,
+          背景: safeDescription,
+          当前阶段: "开局导入",
+          目标: safeFinalGoal ? [safeFinalGoal] : [],
+          失败条件: []
+        },
+        主线目标: {
+          最终目标: safeFinalGoal,
+          当前进度: "开局",
+          阶段目标: []
+        }
+      },
+      任务列表: []
+    },
+    openingStory: {
+      round: 1,
+      publicLines: [
+        { speaker: "公共旁白", text: `故事开始：《${safeTitle}》` },
+        ...(safeDescription ? [{ speaker: "公共旁白", text: safeDescription }] : [])
+      ],
+      segments: []
+    }
+  };
+};
+
+const sanitizeScriptOpeningInput = (
+  openingInput: unknown,
+  fallback: { title: string; description: string; finalGoal: string }
+): ScriptOpeningConfig => {
+  const fallbackOpening = buildDefaultOpeningConfig(fallback);
+  if (!openingInput || typeof openingInput !== "object") return fallbackOpening;
+
+  const enabled = (openingInput as any).enabled !== false;
+  const initialStateRaw = (openingInput as any).initialState;
+  const initialState = initialStateRaw && typeof initialStateRaw === "object"
+    ? initialStateRaw as ScriptOpeningConfig["initialState"]
+    : fallbackOpening.initialState;
+
+  const openingStoryRaw = (openingInput as any).openingStory;
+  const round = Number((openingStoryRaw as any)?.round);
+  const publicLinesRaw = Array.isArray((openingStoryRaw as any)?.publicLines) ? (openingStoryRaw as any).publicLines : [];
+  const segmentsRaw = Array.isArray((openingStoryRaw as any)?.segments) ? (openingStoryRaw as any).segments : [];
+  const publicLines = publicLinesRaw
+    .map(sanitizeScriptStoryLine)
+    .filter((line): line is { speaker: string; text: string } => Boolean(line));
+  const segments = segmentsRaw
+    .map(sanitizeScriptStorySegment)
+    .filter((segment): segment is { groupId: string; title: string; lines: { speaker: string; text: string }[]; visibleToPlayerIds?: string[] } => Boolean(segment));
+
+  return {
+    enabled,
+    initialState,
+    openingStory: {
+      round: Number.isFinite(round) && round > 0 ? Math.floor(round) : fallbackOpening.openingStory.round,
+      publicLines: publicLines.length > 0 ? publicLines : fallbackOpening.openingStory.publicLines,
+      segments
+    }
+  };
+};
+
 const sanitizeScriptInput = (input: Partial<ScriptDefinition>): ScriptDefinition => {
   const now = Date.now();
   const toList = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
+  const id = String(input.id || "script-" + now);
+  const title = String(input.title || "未命名剧本");
+  const description = String(input.description || "");
+  const content = String(input.content || "");
+  const settingPrompt = String(input.settingPrompt || "");
+  const finalGoal = String(input.finalGoal || "");
   return {
-    id: String(input.id || "script-" + now),
-    title: String(input.title || "未命名剧本"),
-    description: String(input.description || ""),
+    id,
+    title,
+    description,
     tags: toList(input.tags),
-    content: String(input.content || ""),
-    settingPrompt: String(input.settingPrompt || ""),
-    finalGoal: String(input.finalGoal || ""),
+    content,
+    settingPrompt,
+    finalGoal,
+    opening: sanitizeScriptOpeningInput((input as any).opening, { title, description, finalGoal }),
     roleTemplates: Array.isArray(input.roleTemplates) ? input.roleTemplates : []
   };
 };
@@ -612,6 +731,14 @@ const clampInt = (value: unknown, min: number, max: number) => {
   return Math.max(min, Math.min(max, Math.floor(num)));
 };
 
+const normalizeAccountUsernameKey = (value: unknown) => String(value || "").trim().toLowerCase();
+
+const normalizePlayerSlot = (slot: unknown, maxPlayers = 4) => {
+  const num = Number(slot);
+  if (!Number.isFinite(num)) return 1;
+  return Math.max(1, Math.min(maxPlayers, Math.floor(num)));
+};
+
 const sumAttributes = (attrs: CharacterAttributeBlock) => {
   return attrs.力量 + attrs.敏捷 + attrs.体质 + attrs.智力 + attrs.感知 + attrs.魅力;
 };
@@ -736,17 +863,41 @@ const syncHostIfNeeded = (room: Room) => {
 };
 
 const ensureSavedCharactersForLoadMode = (room: Room) => {
-  if (room.savedCharacters.length > 0) return;
+  const slotPreferredAccountMap = new Map<number, string>();
+  Object.entries(room.accountSlotMap || {}).forEach(([accountKey, slot]) => {
+    const normalizedSlot = normalizePlayerSlot(slot, room.maxPlayers);
+    if (!slotPreferredAccountMap.has(normalizedSlot)) {
+      slotPreferredAccountMap.set(normalizedSlot, accountKey);
+    }
+  });
+
+  if (room.savedCharacters.length > 0) {
+    room.savedCharacters = room.savedCharacters.map((saved, index) => ({
+      ...saved,
+      slotIndex: normalizePlayerSlot((saved as any).slotIndex ?? index + 1, room.maxPlayers),
+      preferredAccountUsername: typeof (saved as any).preferredAccountUsername === "string"
+        ? (saved as any).preferredAccountUsername
+        : slotPreferredAccountMap.get(normalizePlayerSlot((saved as any).slotIndex ?? index + 1, room.maxPlayers)) || null
+    }));
+    return;
+  }
 
   const now = Date.now();
-  room.savedCharacters = room.script.roleTemplates.slice(0, room.maxPlayers).map((template, index) => {
+  room.savedCharacters = Array.from({ length: room.maxPlayers }).map((_, index) => {
+    const slotIndex = index + 1;
+    const template = room.script.roleTemplates[index] || room.script.roleTemplates[0];
+    if (!template) {
+      throw new Error("该剧本未配置角色模板");
+    }
     const profile = createDefaultCharacterProfile(template);
-    profile.characterName = template.name;
+    profile.characterName = `玩家${slotIndex}号角色`;
 
     return {
-      id: `saved-${now}-${index + 1}`,
-      name: template.name,
+      id: `saved-${now}-${slotIndex}`,
+      name: `玩家${slotIndex}号位`,
       roleTemplateId: template.id,
+      slotIndex,
+      preferredAccountUsername: slotPreferredAccountMap.get(slotIndex) || null,
       profile,
       claimedBy: null
     };
@@ -777,6 +928,23 @@ const switchGameSetupMode = (room: Room, mode: "new_game" | "load_save") => {
   room.players.forEach((player) => {
     player.selectedSavedCharacterId = null;
     player.canCreateCustomCharacter = false;
+
+    const playerSlot = normalizePlayerSlot(player.playerSlot, room.maxPlayers);
+    const slotSavedCharacter = room.savedCharacters.find((saved) => normalizePlayerSlot(saved.slotIndex, room.maxPlayers) === playerSlot);
+    if (!slotSavedCharacter) return;
+
+    const playerAccount = normalizeAccountUsernameKey(player.accountUsername);
+    const preferredAccount = normalizeAccountUsernameKey(slotSavedCharacter.preferredAccountUsername);
+    const shouldAutoClaim = Boolean(playerAccount && preferredAccount && playerAccount === preferredAccount);
+    if (!shouldAutoClaim) return;
+    if (slotSavedCharacter.claimedBy && slotSavedCharacter.claimedBy !== player.id) return;
+
+    slotSavedCharacter.claimedBy = player.id;
+    player.selectedSavedCharacterId = slotSavedCharacter.id;
+    player.selectedRoleTemplateId = slotSavedCharacter.roleTemplateId;
+    player.characterProfile = JSON.parse(JSON.stringify(slotSavedCharacter.profile)) as PlayerCharacterProfile;
+    player.canCreateCustomCharacter = false;
+    applyCharacterProfilePatch(room, player, {});
   });
 };
 
@@ -790,6 +958,12 @@ const claimSavedCharacterForPlayer = (room: Room, player: Player, characterId: s
     throw new Error("该角色已被其他玩家选择");
   }
 
+  const playerSlot = normalizePlayerSlot(player.playerSlot, room.maxPlayers);
+  const savedSlot = normalizePlayerSlot(savedCharacter.slotIndex, room.maxPlayers);
+  if (savedSlot !== playerSlot) {
+    throw new Error(`你只能选择与你玩家序号一致的角色槽位（当前为玩家${playerSlot}）`);
+  }
+
   room.savedCharacters.forEach((saved) => {
     if (saved.claimedBy === player.id) {
       saved.claimedBy = null;
@@ -801,6 +975,7 @@ const claimSavedCharacterForPlayer = (room: Room, player: Player, characterId: s
   player.selectedRoleTemplateId = savedCharacter.roleTemplateId;
   player.characterProfile = JSON.parse(JSON.stringify(savedCharacter.profile)) as PlayerCharacterProfile;
   player.canCreateCustomCharacter = false;
+  savedCharacter.preferredAccountUsername = player.accountUsername ? String(player.accountUsername) : null;
   applyCharacterProfilePatch(room, player, {});
 };
 

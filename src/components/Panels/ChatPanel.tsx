@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 游戏日志 } from '../../types/GameData';
+import { 游戏日志 } from '../../types/gameData';
 import { Send, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -99,3 +99,4 @@ export default function ChatPanel({ logs, onSendChat }: ChatPanelProps) {
     </div>
   );
 }
+

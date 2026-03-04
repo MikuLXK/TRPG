@@ -3,7 +3,7 @@ import { MessageSquare, Menu as MenuIcon } from 'lucide-react';
 import ChatPanel from './ChatPanel';
 import ActionMenuPanel from './ActionMenuPanel';
 import TeamPanel from './TeamPanel';
-import { 游戏日志 } from '../../types/GameData';
+import { 游戏日志 } from '../../types/gameData';
 
 interface RightPanelProps {
   logs: 游戏日志[];
@@ -56,3 +56,4 @@ export default function RightPanel({ logs, onSendChat, onOpenSettings, players =
     </div>
   );
 }
+

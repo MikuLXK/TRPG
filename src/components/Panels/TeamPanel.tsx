@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { User, Heart, Zap, ChevronLeft } from 'lucide-react';
-import { 角色信息 } from '../../types/GameData';
+import { 角色信息 } from '../../types/gameData';
 
 interface TeamPanelProps {
   players: any[]; // Using 'any' for now as we might need to extend the player type with character stats
@@ -113,3 +113,4 @@ export default function TeamPanel({ players, onBack }: TeamPanelProps) {
     </div>
   );
 }
+

@@ -1,5 +1,5 @@
 import React from 'react';
-import { 角色信息 } from '../../types/GameData';
+import { 角色信息 } from '../../types/gameData';
 import { Shield, Zap, Heart, User, Activity } from 'lucide-react';
 
 interface CharacterPanelProps {
@@ -85,3 +85,4 @@ export default function CharacterPanel({ 角色 }: CharacterPanelProps) {
     </div>
   );
 }
+

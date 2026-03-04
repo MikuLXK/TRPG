@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { 游戏状态 } from '../types/GameData';
+import { 游戏状态 } from '../types/gameData';
 import type { ScriptDefinition } from '../types/Script';
 
 export interface AuthUserProfile {
@@ -422,3 +422,4 @@ class DBService {
 }
 
 export const dbService = new DBService();
+

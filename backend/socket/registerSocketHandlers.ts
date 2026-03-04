@@ -37,6 +37,7 @@ export const registerSocketHandlers = (deps: {
       generateRoomId: deps.generateRoomId,
       cloneDefaultAISettings: deps.cloneDefaultAISettings,
       createDefaultCharacterProfile: deps.createDefaultCharacterProfile,
+      claimSavedCharacterForPlayer: deps.claimSavedCharacterForPlayer,
       getMaxHPByAttributes: deps.getMaxHPByAttributes,
       getMaxMPByAttributes: deps.getMaxMPByAttributes,
       computeHash: deps.computeHash,
@@ -72,4 +73,3 @@ export const registerSocketHandlers = (deps: {
     });
   });
 };
-

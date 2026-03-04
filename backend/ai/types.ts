@@ -34,6 +34,7 @@ export interface ScriptLike {
 export interface PlayerLike {
   id: string;
   name: string;
+  playerSlot?: number;
   isOnline?: boolean;
   action: string;
   location: string;
@@ -58,6 +59,7 @@ export interface RoomLike {
 export interface ActionCollectorRawAction {
   playerId: string;
   playerName: string;
+  playerSlot?: number;
   location: string;
   action: string;
 }
@@ -97,8 +99,8 @@ export interface MainStoryPayload {
 export interface StateProcessorPayload {
   changes: Array<{
     playerId: string;
+    playerSlot?: number;
     fields: Record<string, unknown>;
     reason: string;
   }>;
 }
-

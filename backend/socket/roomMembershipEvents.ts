@@ -7,11 +7,75 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
   generateRoomId: () => string;
   cloneDefaultAISettings: () => any;
   createDefaultCharacterProfile: (template: any) => any;
+  claimSavedCharacterForPlayer: (room: any, player: any, characterId: string) => void;
   getMaxHPByAttributes: (attrs: any) => number;
   getMaxMPByAttributes: (attrs: any) => number;
   computeHash: (value: unknown) => string;
   syncHostIfNeeded: (room: any) => void;
 }) => {
+  const normalizeAccountKey = (value: unknown) => String(value || "").trim().toLowerCase();
+  const normalizeSlot = (value: unknown, maxPlayers = 4) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 1;
+    return Math.max(1, Math.min(maxPlayers, Math.floor(num)));
+  };
+
+  const ensureAccountSlotMap = (room: any) => {
+    if (!room.accountSlotMap || typeof room.accountSlotMap !== "object") {
+      room.accountSlotMap = {};
+    }
+    return room.accountSlotMap as Record<string, number>;
+  };
+
+  const collectUsedSlots = (room: any) => {
+    const used = new Set<number>();
+    room.players.forEach((player: any) => {
+      used.add(normalizeSlot(player.playerSlot, room.maxPlayers || 4));
+    });
+    return used;
+  };
+
+  const pickPlayerSlotForJoin = (room: any, accountUsername?: string) => {
+    const map = ensureAccountSlotMap(room);
+    const accountKey = normalizeAccountKey(accountUsername);
+    const usedSlots = collectUsedSlots(room);
+    const maxPlayers = Math.max(1, Number(room.maxPlayers) || 4);
+
+    if (accountKey) {
+      const preferred = normalizeSlot(map[accountKey], maxPlayers);
+      if (!usedSlots.has(preferred)) {
+        map[accountKey] = preferred;
+        return preferred;
+      }
+    }
+
+    for (let slot = 1; slot <= maxPlayers; slot += 1) {
+      if (!usedSlots.has(slot)) {
+        if (accountKey) map[accountKey] = slot;
+        return slot;
+      }
+    }
+    return 1;
+  };
+
+  const tryAutoClaimSlotCharacter = (room: any, player: any) => {
+    if (room.gameSetupMode !== "load_save") return;
+    if (!Array.isArray(room.savedCharacters) || room.savedCharacters.length === 0) return;
+    const playerSlot = normalizeSlot(player.playerSlot, room.maxPlayers || 4);
+    const target = room.savedCharacters.find((saved: any) => normalizeSlot(saved.slotIndex, room.maxPlayers || 4) === playerSlot);
+    if (!target) return;
+    if (target.claimedBy && target.claimedBy !== player.id) return;
+    const playerAccount = normalizeAccountKey(player.accountUsername);
+    const preferredAccount = normalizeAccountKey(target.preferredAccountUsername);
+    if (!playerAccount || !preferredAccount || playerAccount !== preferredAccount) return;
+
+    try {
+      deps.claimSavedCharacterForPlayer(room, player, target.id);
+    } catch {
+      // ignore auto-claim failure
+    }
+  };
+
   socket.on("get_rooms", (data?: { accountUsername?: string; playerName?: string }) => {
     const accountUsername = typeof data?.accountUsername === "string" ? data.accountUsername.trim() : "";
     const playerName = typeof data?.playerName === "string" ? data.playerName.trim() : "";
@@ -44,6 +108,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
     if (!script.roleTemplates.length) return socket.emit("error", "该剧本未配置角色模板");
 
     const roomId = deps.generateRoomId();
+    const hostSlot = 1;
     const newRoom = {
       id: roomId,
       hostId: socket.id,
@@ -55,6 +120,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
         id: socket.id,
         name: data.playerName || "房主",
         accountUsername: data.accountUsername,
+        playerSlot: hostSlot,
         isReady: false,
         action: "",
         location: "初始地点",
@@ -83,6 +149,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       functionRotationIndex: { actionCollector: 0, mainStory: 0, stateProcessor: 0 },
       emptySince: null,
       script,
+      accountSlotMap: data.accountUsername ? { [normalizeAccountKey(data.accountUsername)]: hostSlot } : {},
       sharedAssets: {
         script: {
           assetType: "script",
@@ -124,6 +191,10 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       existingPlayer.id = socket.id;
       existingPlayer.name = playerName;
       existingPlayer.accountUsername = accountUsername ?? existingPlayer.accountUsername;
+      ensureAccountSlotMap(room);
+      if (existingPlayer.accountUsername) {
+        room.accountSlotMap[normalizeAccountKey(existingPlayer.accountUsername)] = normalizeSlot(existingPlayer.playerSlot, room.maxPlayers || 4);
+      }
       existingPlayer.isOnline = true;
       existingPlayer.lastSeenAt = null;
       if (oldId && oldId !== socket.id) delete deps.socketRoomIndex[oldId];
@@ -146,10 +217,15 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       existingPlayer.id = socket.id;
       existingPlayer.name = playerName;
       existingPlayer.accountUsername = accountUsername ?? existingPlayer.accountUsername;
+      ensureAccountSlotMap(room);
+      if (existingPlayer.accountUsername) {
+        room.accountSlotMap[normalizeAccountKey(existingPlayer.accountUsername)] = normalizeSlot(existingPlayer.playerSlot, room.maxPlayers || 4);
+      }
       existingPlayer.isOnline = true;
       existingPlayer.lastSeenAt = null;
       existingPlayer.isReady = false;
       existingPlayer.action = "";
+      tryAutoClaimSlotCharacter(room, existingPlayer);
       if (oldId && oldId !== socket.id) delete deps.socketRoomIndex[oldId];
       deps.socketRoomIndex[socket.id] = roomId;
       room.emptySince = null;
@@ -163,10 +239,12 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
 
     const firstTemplate = room.script.roleTemplates[0];
     if (!firstTemplate) return socket.emit("error", "该剧本未配置角色模板");
-    room.players.push({
+    const playerSlot = pickPlayerSlotForJoin(room, accountUsername);
+    const nextPlayer = {
       id: socket.id,
       name: playerName,
       accountUsername,
+      playerSlot,
       isReady: false,
       action: "",
       location: "初始地点",
@@ -181,7 +259,12 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       currentHP: deps.getMaxHPByAttributes(firstTemplate.baseAttributes),
       currentMP: deps.getMaxMPByAttributes(firstTemplate.baseAttributes),
       statusEffects: []
-    });
+    };
+    if (room.gameSetupMode === "load_save") {
+      nextPlayer.canCreateCustomCharacter = false;
+      tryAutoClaimSlotCharacter(room, nextPlayer);
+    }
+    room.players.push(nextPlayer);
     room.emptySince = null;
     deps.socketRoomIndex[socket.id] = roomId;
     socket.join(roomId);

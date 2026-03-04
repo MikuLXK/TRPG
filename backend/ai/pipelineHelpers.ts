@@ -41,6 +41,7 @@ export const buildActionCollectorInput = (room: RoomLike) => {
   const actions: ActionCollectorRawAction[] = activePlayers.map((player) => ({
     playerId: player.id,
     playerName: player.name,
+    playerSlot: Number.isFinite(Number((player as any).playerSlot)) ? Math.max(1, Math.floor(Number((player as any).playerSlot))) : undefined,
     location: player.location,
     action: String(player.action || "").trim()
   }));
@@ -87,6 +88,9 @@ export const normalizeActionCollectorPayload = (
       rawActionMap.set(playerId, {
         playerId,
         playerName: toSingleLine((item as any)?.playerName ?? base.playerName, base.playerName),
+        playerSlot: Number.isFinite(Number((item as any)?.playerSlot))
+          ? Math.max(1, Math.floor(Number((item as any).playerSlot)))
+          : base.playerSlot,
         location: toSingleLine((item as any)?.location ?? base.location, base.location),
         action: String((item as any)?.action ?? base.action).trim()
       });
@@ -151,6 +155,7 @@ export const buildMainStoryInput = (room: RoomLike, groupedActions: ActionCollec
   const players = activePlayers.map((player) => ({
     playerId: player.id,
     playerName: player.name,
+    playerSlot: Number.isFinite(Number((player as any).playerSlot)) ? Math.max(1, Math.floor(Number((player as any).playerSlot))) : undefined,
     location: player.location,
     currentHP: player.currentHP,
     currentMP: player.currentMP,
@@ -186,6 +191,7 @@ export const buildStateProcessorInput = (room: RoomLike, storyPayload: MainStory
   const currentState = room.players.map((player) => ({
     playerId: player.id,
     playerName: player.name,
+    playerSlot: Number.isFinite(Number((player as any).playerSlot)) ? Math.max(1, Math.floor(Number((player as any).playerSlot))) : undefined,
     location: player.location,
     currentHP: player.currentHP,
     currentMP: player.currentMP,
@@ -245,11 +251,17 @@ export const normalizeStateProcessorPayload = (room: RoomLike, parsed: { changes
     ? parsed.changes
         .map((item) => {
           const playerId = String((item as any)?.playerId || "").trim();
+          const rawPlayerSlot = Number((item as any)?.playerSlot ?? (item as any)?.slot ?? 0);
+          const playerSlot = Number.isFinite(rawPlayerSlot) && rawPlayerSlot > 0 ? Math.floor(rawPlayerSlot) : undefined;
           const fields = (item as any)?.fields && typeof (item as any).fields === "object" ? (item as any).fields as Record<string, unknown> : {};
           const reason = String((item as any)?.reason || "").trim();
-          return { playerId, fields, reason };
+          return { playerId, playerSlot, fields, reason };
         })
-        .filter((item) => item.playerId && room.players.some((player) => player.id === item.playerId))
+        .filter((item) => {
+          if (item.playerId && room.players.some((player) => player.id === item.playerId)) return true;
+          if (item.playerSlot && room.players.some((player: any) => Number(player.playerSlot) === item.playerSlot)) return true;
+          return false;
+        })
     : [];
   return { changes };
 };

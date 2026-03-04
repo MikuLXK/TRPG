@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Users, Copy, Check, Play, LogOut, User, Server, ScrollText, Archive, Sparkles, UserPlus } from 'lucide-react';
 import { socketService } from '../../services/socketService';
 import ChatPanel from '../Panels/ChatPanel';
-import { 游戏日志 } from '../../types/GameData';
+import { 游戏日志 } from '../../types/gameData';
 import type { AIFunctionType } from '../../types/Settings';
 import type { CharacterAttributeBlock, PlayerCharacterProfile } from '../../types/Script';
 
@@ -69,6 +69,7 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
   }, [roleTemplates, selfPlayer?.selectedRoleTemplateId]);
 
   const selfProfile: PlayerCharacterProfile | null = selfPlayer?.characterProfile || null;
+  const selfPlayerSlot = Number(selfPlayer?.playerSlot || 0);
   const isLoadMode = gameSetupMode === 'load_save';
   const selfCanCreateCustomCharacter = Boolean(selfPlayer?.canCreateCustomCharacter);
   const selfSelectedSavedCharacterId = selfPlayer?.selectedSavedCharacterId || null;
@@ -341,6 +342,9 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-zinc-200 flex items-center gap-2">
                         {player.name}
+                        {Number.isFinite(Number(player.playerSlot)) && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">玩家{player.playerSlot}</span>
+                        )}
                         {player.id === selfId && <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/20 text-amber-500 rounded">我</span>}
                         {player.id === roomState.hostId && <span className="text-[10px] px-1.5 py-0.5 bg-zinc-700 text-zinc-300 rounded">房主</span>}
                       </div>
@@ -415,7 +419,9 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
                   {savedCharacters.map((saved: any) => {
                     const claimedPlayer = players.find((p: any) => p.id === saved.claimedBy);
                     const isMine = selfSelectedSavedCharacterId === saved.id;
-                    const disabled = Boolean(saved.claimedBy && !isMine);
+                    const savedSlot = Number(saved.slotIndex || 0);
+                    const slotMismatch = Boolean(selfPlayerSlot && savedSlot && savedSlot !== selfPlayerSlot);
+                    const disabled = slotMismatch || Boolean(saved.claimedBy && !isMine);
                     return (
                       <button
                         key={saved.id}
@@ -430,9 +436,15 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
                               : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-amber-500/40'
                         }`}
                       >
-                        <div className="text-sm font-semibold">{saved.name}</div>
+                        <div className="text-sm font-semibold">{saved.name} {saved.slotIndex ? `(玩家${saved.slotIndex})` : ''}</div>
                         <div className="text-[11px] text-zinc-500">
-                          {disabled ? `已被 ${claimedPlayer?.name || '其他玩家'} 选择` : isMine ? '你已选择该角色' : '点击选择该角色'}
+                          {slotMismatch
+                            ? `仅玩家${selfPlayerSlot}可选择此槽位`
+                            : disabled
+                              ? `已被 ${claimedPlayer?.name || '其他玩家'} 选择`
+                              : isMine
+                                ? '你已选择该角色'
+                                : '点击选择该角色'}
                         </div>
                       </button>
                     );
@@ -626,3 +638,4 @@ export default function WaitingRoom({ roomState, onStartGame, onLeaveRoom }: Wai
     </div>
   );
 }
+

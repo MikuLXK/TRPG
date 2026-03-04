@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { 游戏日志 } from '../../types/GameData';
+import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react';
+import { 游戏日志 } from '../../types/gameData';
 import { Send, Waves, Ban } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -20,9 +20,195 @@ interface GameLogPanelProps {
     isReady: boolean;
     action: string;
   }>;
+  selfSpeakerNames?: string[];
   streamingMode?: 'off' | 'provider';
   onToggleStreamingMode?: () => void;
 }
+
+interface StoryLine {
+  speaker: string;
+  text: string;
+}
+
+interface StoryPayload {
+  round?: number;
+  publicLines?: StoryLine[];
+  segments?: Array<{
+    groupId?: string;
+    visibleToPlayerIds?: string[];
+    title?: string;
+    lines?: StoryLine[];
+  }>;
+}
+
+interface DisplayEntry {
+  id: string;
+  speaker: string;
+  text: string;
+  time: string;
+  kind: 'publicNarration' | 'narration' | 'dialogue' | 'judge' | 'hint' | 'section' | 'system';
+  align: 'left' | 'right' | 'center';
+}
+
+const TITLE_LINE_PATTERN = /^【[^】]+】\|【[^】]+】$/;
+const TAG_LINE_PATTERN = /^【([^】]+)】\s*(.*)$/;
+
+const normalizeName = (value: string) => String(value || '').trim().toLowerCase();
+
+const tryParseStoryPayload = (raw: string): StoryPayload | null => {
+  const source = String(raw || '').trim();
+  if (!source) return null;
+  try {
+    const parsed = JSON.parse(source) as StoryPayload;
+    if (Array.isArray(parsed?.publicLines) || Array.isArray(parsed?.segments)) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const classifyTaggedLine = (
+  speaker: string,
+  text: string,
+  selfSpeakerSet: Set<string>
+): Omit<DisplayEntry, 'id' | 'time'> => {
+  if (speaker === '公共旁白') {
+    return { speaker, text, kind: 'publicNarration', align: 'center' };
+  }
+  if (speaker === '旁白') {
+    return { speaker, text, kind: 'narration', align: 'center' };
+  }
+  if (speaker === '判定') {
+    return { speaker, text, kind: 'judge', align: 'center' };
+  }
+  if (speaker === '下一步可选行动提示') {
+    return { speaker, text, kind: 'hint', align: 'center' };
+  }
+  const isSelf = selfSpeakerSet.has(normalizeName(speaker)) || normalizeName(speaker) === '你';
+  return { speaker, text, kind: 'dialogue', align: isSelf ? 'right' : 'left' };
+};
+
+const parseStoryTextLines = (
+  raw: string,
+  log: 游戏日志,
+  selfSpeakerSet: Set<string>
+): DisplayEntry[] => {
+  const source = String(raw || '').trim();
+  if (!source) return [];
+  const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
+  const entries: DisplayEntry[] = [];
+  let index = 0;
+
+  for (const line of lines) {
+    if (TITLE_LINE_PATTERN.test(line)) {
+      entries.push({
+        id: `${log.id}-section-${index++}`,
+        speaker: '分组',
+        text: line,
+        time: log.时间戳,
+        kind: 'section',
+        align: 'center'
+      });
+      continue;
+    }
+
+    const tagged = line.match(TAG_LINE_PATTERN);
+    if (tagged) {
+      const speaker = String(tagged[1] || '').trim();
+      const text = String(tagged[2] || '').trim();
+      const classified = classifyTaggedLine(speaker, text, selfSpeakerSet);
+      entries.push({
+        id: `${log.id}-line-${index++}`,
+        time: log.时间戳,
+        ...classified
+      });
+      continue;
+    }
+
+    entries.push({
+      id: `${log.id}-line-${index++}`,
+      speaker: '旁白',
+      text: line,
+      time: log.时间戳,
+      kind: 'narration',
+      align: 'center'
+    });
+  }
+
+  return entries;
+};
+
+const parseStoryJson = (payload: StoryPayload, log: 游戏日志, selfSpeakerSet: Set<string>): DisplayEntry[] => {
+  const entries: DisplayEntry[] = [];
+  let index = 0;
+  const publicLines = Array.isArray(payload.publicLines) ? payload.publicLines : [];
+  const segments = Array.isArray(payload.segments) ? payload.segments : [];
+
+  for (const line of publicLines) {
+    const speaker = String(line?.speaker || '').trim();
+    const text = String(line?.text || '').trim();
+    if (!speaker || !text) continue;
+    const classified = classifyTaggedLine(speaker, text, selfSpeakerSet);
+    entries.push({
+      id: `${log.id}-pub-${index++}`,
+      time: log.时间戳,
+      ...classified
+    });
+  }
+
+  for (const segment of segments) {
+    const title = String(segment?.title || '').trim();
+    if (title) {
+      entries.push({
+        id: `${log.id}-segtitle-${index++}`,
+        speaker: '分组',
+        text: title,
+        time: log.时间戳,
+        kind: 'section',
+        align: 'center'
+      });
+    }
+    const lines = Array.isArray(segment?.lines) ? segment.lines : [];
+    for (const line of lines) {
+      const speaker = String(line?.speaker || '').trim();
+      const text = String(line?.text || '').trim();
+      if (!speaker || !text) continue;
+      const classified = classifyTaggedLine(speaker, text, selfSpeakerSet);
+      entries.push({
+        id: `${log.id}-segline-${index++}`,
+        time: log.时间戳,
+        ...classified
+      });
+    }
+  }
+
+  return entries;
+};
+
+const parseLogToEntries = (log: 游戏日志, selfSpeakerSet: Set<string>): DisplayEntry[] => {
+  const content = String(log.内容 || '').trim();
+  if (!content) return [];
+
+  if (log.发送者 === '系统') {
+    const payload = tryParseStoryPayload(content);
+    if (payload) {
+      const structured = parseStoryJson(payload, log, selfSpeakerSet);
+      if (structured.length > 0) return structured;
+    }
+    return parseStoryTextLines(content, log, selfSpeakerSet);
+  }
+
+  const speaker = log.发送者 === '玩家' ? '你' : String(log.发送者 || '系统');
+  const isSelf = log.发送者 === '玩家' || selfSpeakerSet.has(normalizeName(speaker));
+  return [{
+    id: `${log.id}-raw`,
+    speaker,
+    text: content,
+    time: log.时间戳,
+    kind: log.类型 === '系统' ? 'system' : 'dialogue',
+    align: isSelf ? 'right' : 'left'
+  }];
+};
 
 export default function GameLogPanel({
   日志列表,
@@ -36,17 +222,23 @@ export default function GameLogPanel({
   currentRound = 1,
   aiStepText = '等待玩家输入',
   playerInputStates = [],
+  selfSpeakerNames = [],
   streamingMode = 'provider',
   onToggleStreamingMode,
 }: GameLogPanelProps) {
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selfSpeakerSet = useMemo(() => new Set(selfSpeakerNames.map(normalizeName).filter(Boolean)), [selfSpeakerNames]);
+  const displayEntries = useMemo(
+    () => 日志列表.flatMap((log) => parseLogToEntries(log, selfSpeakerSet)),
+    [日志列表, selfSpeakerSet]
+  );
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [日志列表, streamPreview]);
+  }, [displayEntries, streamPreview]);
 
   const handleSend = () => {
     if (inputText.trim() && !isReady) {
@@ -95,38 +287,71 @@ export default function GameLogPanel({
         </div>
 
         <AnimatePresence>
-          {日志列表.map((log) => (
+          {displayEntries.map((entry) => (
             <motion.div
-              key={log.id}
+              key={entry.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`flex flex-col ${log.发送者 === '玩家' ? 'items-end' : 'items-start'}`}
+              className={`flex flex-col ${
+                entry.align === 'right'
+                  ? 'items-end'
+                  : entry.align === 'left'
+                    ? 'items-start'
+                    : 'items-center'
+              }`}
             >
-              <div className="flex items-center gap-2 mb-1 opacity-60">
-                {log.类型 !== '旁白' && (
-                  <>
-                    <span className={`text-xs font-bold uppercase tracking-wider
-                      ${log.发送者 === '系统' ? 'text-amber-500' : 'text-cyan-500'}`}>
-                      {log.发送者}
-                    </span>
-                    <span className="text-[10px] text-zinc-500 font-mono">{log.时间戳}</span>
-                  </>
-                )}
-              </div>
+              {entry.kind === 'publicNarration' && (
+                <div className="w-full max-w-[92%] px-5 py-3 rounded-2xl border border-emerald-500/35 bg-emerald-950/25 text-emerald-100 text-sm leading-relaxed text-center font-medium shadow-[0_0_20px_rgba(16,185,129,0.12)]">
+                  <div className="text-[10px] uppercase tracking-widest text-emerald-400/80 mb-1">公共旁白</div>
+                  <div className="whitespace-pre-wrap">{entry.text}</div>
+                </div>
+              )}
 
-              <div className={`
-                max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed shadow-lg backdrop-blur-sm border
-                ${log.类型 === '旁白'
-                  ? 'bg-zinc-900/90 border-amber-500/50 text-amber-100 w-full text-center font-serif tracking-wide my-4 py-6 shadow-[0_0_15px_rgba(245,158,11,0.1)] mx-auto'
-                  : log.类型 === '系统'
-                    ? 'bg-zinc-900/80 border-amber-900/30 text-zinc-300 w-full text-center italic'
-                    : log.发送者 === '玩家'
-                      ? 'bg-cyan-950/30 border-cyan-800/30 text-cyan-100 rounded-tr-none'
-                      : 'bg-zinc-800/50 border-zinc-700/30 text-zinc-200 rounded-tl-none'
-                }
-              `}>
-                {log.内容}
-              </div>
+              {entry.kind === 'narration' && (
+                <div className="w-full max-w-[92%] px-5 py-4 rounded-2xl border border-amber-500/45 bg-zinc-900/90 text-amber-100 text-sm leading-relaxed text-center font-serif tracking-wide shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">旁白</div>
+                  <div className="whitespace-pre-wrap">{entry.text}</div>
+                </div>
+              )}
+
+              {entry.kind === 'judge' && (
+                <div className="w-full max-w-[92%] px-4 py-3 rounded-xl border border-fuchsia-500/35 bg-fuchsia-950/20 text-fuchsia-100 text-xs leading-relaxed text-center">
+                  <div className="text-[10px] uppercase tracking-widest text-fuchsia-300/80 mb-1">判定</div>
+                  <div className="whitespace-pre-wrap">{entry.text}</div>
+                </div>
+              )}
+
+              {entry.kind === 'hint' && (
+                <div className="w-full max-w-[92%] px-4 py-3 rounded-xl border border-cyan-500/35 bg-cyan-950/20 text-cyan-100 text-xs leading-relaxed text-center">
+                  <div className="text-[10px] uppercase tracking-widest text-cyan-300/80 mb-1">行动提示</div>
+                  <div className="whitespace-pre-wrap">{entry.text}</div>
+                </div>
+              )}
+
+              {entry.kind === 'section' && (
+                <div className="w-full max-w-[92%] px-2 py-1 text-center text-[11px] tracking-wider text-zinc-500">
+                  {entry.text}
+                </div>
+              )}
+
+              {(entry.kind === 'dialogue' || entry.kind === 'system') && (
+                <div className={`w-full flex ${entry.align === 'right' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[78%] flex flex-col ${entry.align === 'right' ? 'items-end' : 'items-start'}`}>
+                    <div className={`mb-1 text-[11px] tracking-wide ${entry.align === 'right' ? 'text-cyan-300/80' : 'text-zinc-400'}`}>
+                      {entry.speaker}
+                      <span className="ml-2 text-[10px] text-zinc-500 font-mono">{entry.time}</span>
+                    </div>
+                    <div className={`
+                      px-4 py-3 rounded-2xl border text-sm leading-relaxed whitespace-pre-wrap
+                      ${entry.align === 'right'
+                        ? 'bg-cyan-950/35 border-cyan-700/35 text-cyan-100 rounded-tr-sm shadow-[0_0_12px_rgba(34,211,238,0.08)]'
+                        : 'bg-zinc-800/65 border-zinc-700/40 text-zinc-100 rounded-tl-sm'}
+                    `}>
+                      {entry.text}
+                    </div>
+                  </div>
+                </div>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -192,3 +417,4 @@ export default function GameLogPanel({
     </div>
   );
 }
+

@@ -1,9 +1,9 @@
 import path from "path";
 import { promises as fs } from "fs";
-import type { AIFunctionType, CorePromptType, PromptRole, RoomLike, PlayerLike } from "./types";
+import type { AIFunctionType, PromptRole, RoomLike, PlayerLike } from "./types";
 
-const CORE_PROMPT_SEQUENCE: CorePromptType[] = ["data", "cot", "format"];
 const CONTEXT_TEXT_LIMIT = 1200;
+const PROMPT_ROOT = path.resolve(process.cwd(), "src", "prompts");
 
 const FUNCTION_AI_ROLE_NAMES: Record<AIFunctionType, string> = {
   actionCollector: "行动统筹官·玄枢",
@@ -11,33 +11,67 @@ const FUNCTION_AI_ROLE_NAMES: Record<AIFunctionType, string> = {
   stateProcessor: "状态结算官·玄衡"
 };
 
-const getPromptPath = (functionType: AIFunctionType, role: PromptRole) => {
-  return path.resolve(process.cwd(), "src", "prompts", functionType, `${role}.txt`);
+const FUNCTION_PROMPT_ROOT: Record<AIFunctionType, string> = {
+  mainStory: path.resolve(PROMPT_ROOT, "01_mainStory"),
+  actionCollector: path.resolve(PROMPT_ROOT, "02_actionCollector"),
+  stateProcessor: path.resolve(PROMPT_ROOT, "03_stateProcessor")
 };
 
-const getCorePromptPath = (name: CorePromptType) => {
-  return path.resolve(process.cwd(), "src", "prompts", "core", `${name}.txt`);
+const SYSTEM_CATEGORY_SEQUENCE: Record<AIFunctionType, string[]> = {
+  mainStory: ["00_身份", "10_世界观", "20_游戏设定", "30_数值设定_无变量操作", "40_COT", "99_其他"],
+  actionCollector: ["00_身份", "10_任务定义", "20_输出格式", "30_分类COT", "99_其他"],
+  stateProcessor: ["00_身份", "10_世界观", "20_游戏设定", "30_数值设定_含变量操作", "40_COT", "99_其他"]
 };
 
-export const readPromptFile = async (functionType: AIFunctionType, role: PromptRole): Promise<string> => {
-  const promptPath = getPromptPath(functionType, role);
+const ACTION_COLLECTOR_USER_TEMPLATE_CATEGORY = "40_玩家输入模板";
+
+const DEFAULT_ACTION_COLLECTOR_USER_TEMPLATE = `请根据以下玩家输入内容执行行动划分，并仅输出JSON。
+
+{{actionCollectorInputJson}}`;
+
+const DEFAULT_MAIN_STORY_USER_TEMPLATE = `请根据以下主剧情输入推进剧情，并仅输出JSON。
+
+{{mainStoryInputJson}}`;
+
+const DEFAULT_STATE_PROCESSOR_USER_TEMPLATE = `请根据以下状态结算输入进行数值与状态处理，并仅输出JSON。
+
+{{stateProcessorInputJson}}`;
+
+const readTextFileTrim = async (filePath: string) => {
   try {
-    const content = await fs.readFile(promptPath, "utf-8");
+    const content = await fs.readFile(filePath, "utf-8");
     return content.trim();
   } catch {
     return "";
   }
 };
 
-const readCorePromptFile = async (name: CorePromptType): Promise<string> => {
-  const promptPath = getCorePromptPath(name);
+const listTxtFilesRecursive = async (dirPath: string): Promise<string[]> => {
+  let entries: Awaited<ReturnType<typeof fs.readdir>> = [];
   try {
-    const content = await fs.readFile(promptPath, "utf-8");
-    return content.trim();
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
   } catch {
-    return "";
+    return [];
   }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      const subFiles = await listTxtFilesRecursive(fullPath);
+      files.push(...subFiles);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!entry.name.toLowerCase().endsWith(".txt")) continue;
+    files.push(fullPath);
+  }
+  files.sort((a, b) => a.localeCompare(b, "zh-CN"));
+  return files;
 };
+
+const mergePromptBlocks = (parts: string[]) => parts.map((item) => item.trim()).filter(Boolean).join("\n\n");
 
 export const fillTemplate = (template: string, values: Record<string, string>) => {
   let text = template;
@@ -74,40 +108,242 @@ export const safeJsonParse = <T>(text: string): T | null => {
   }
 };
 
-const loadSharedCorePromptText = async () => {
-  const promptList = await Promise.all(CORE_PROMPT_SEQUENCE.map((name) => readCorePromptFile(name)));
-  return promptList.filter(Boolean).join("\n\n");
-};
-
-const buildIdentityPrompt = async (room: RoomLike, providerPlayer: PlayerLike, functionType: AIFunctionType) => {
-  const identityTemplate = await readCorePromptFile("identity");
-  if (!identityTemplate) return "";
-  return fillTemplate(identityTemplate, {
+const buildTemplateValues = (args: {
+  room?: RoomLike;
+  providerPlayer?: PlayerLike;
+  functionType: AIFunctionType;
+}) => {
+  const { room, providerPlayer, functionType } = args;
+  return {
     aiRoleName: FUNCTION_AI_ROLE_NAMES[functionType],
-    playerName: toSingleLine(providerPlayer.name, "未命名"),
-    roomName: toSingleLine(room.name, room.id),
-    round: String(room.currentRound),
+    playerName: toSingleLine(providerPlayer?.name || "", "默认提供者"),
+    roomName: toSingleLine(room?.name || "", room?.id || "默认房间"),
+    round: String(room?.currentRound ?? 0),
     functionType
-  });
+  };
 };
 
-export const buildPromptEnvelope = async (args: {
+const extractCategoryTitle = (categoryDirName: string) => {
+  return categoryDirName.replace(/^\d+_/, "").trim() || categoryDirName;
+};
+
+const wrapSection = (title: string, body: string) => {
+  const content = body.trim();
+  if (!content) return "";
+  return `【${title}】\n${content}`;
+};
+
+const buildIdentityFallback = (functionType: AIFunctionType, templateValues: Record<string, string>) => {
+  return [
+    `你是${FUNCTION_AI_ROLE_NAMES[functionType]}。`,
+    `当前提供者：${templateValues.playerName}。`,
+    `当前房间：${templateValues.roomName}。`,
+    `当前回合：${templateValues.round}。`,
+    `当前功能：${functionType}。`
+  ].join("\n");
+};
+
+const loadCategoryText = async (categoryPath: string, templateValues: Record<string, string>) => {
+  const files = await listTxtFilesRecursive(categoryPath);
+  if (files.length === 0) return "";
+  const chunks = await Promise.all(files.map((filePath) => readTextFileTrim(filePath)));
+  const renderedChunks = chunks.map((chunk) => fillTemplate(chunk, templateValues)).filter(Boolean);
+  return mergePromptBlocks(renderedChunks);
+};
+
+const buildSystemPromptForFunction = async (args: {
   room: RoomLike;
   providerPlayer: PlayerLike;
   functionType: AIFunctionType;
-  systemPromptBase: string;
-  userPromptBody: string;
-  modelPromptBody: string;
+  systemPromptOverride?: string;
 }) => {
-  const [identityPrompt, corePromptText, cotPseudoPrompt] = await Promise.all([
-    buildIdentityPrompt(args.room, args.providerPlayer, args.functionType),
-    loadSharedCorePromptText(),
-    readCorePromptFile("cotPseudo")
-  ]);
+  const functionRoot = FUNCTION_PROMPT_ROOT[args.functionType];
+  const categories = SYSTEM_CATEGORY_SEQUENCE[args.functionType];
+  const templateValues = buildTemplateValues(args);
+  const scriptSettingPrompt = trimTextForContext(args.room.script?.settingPrompt || "", 1200);
+  const systemPromptOverride = String(args.systemPromptOverride || "").trim();
+  const sections: string[] = [];
+
+  for (const category of categories) {
+    const categoryPath = path.resolve(functionRoot, category);
+    const categoryTitle = extractCategoryTitle(category);
+    const categoryText = await loadCategoryText(categoryPath, templateValues);
+    const parts: string[] = [];
+
+    if (category.startsWith("00_身份")) {
+      parts.push(categoryText || buildIdentityFallback(args.functionType, templateValues));
+    } else if (category.includes("世界观")) {
+      parts.push(categoryText);
+      if (scriptSettingPrompt) parts.push(scriptSettingPrompt);
+    } else if (category.startsWith("99_")) {
+      parts.push(categoryText);
+      if (systemPromptOverride) parts.push(systemPromptOverride);
+    } else {
+      parts.push(categoryText);
+    }
+
+    const merged = mergePromptBlocks(parts);
+    if (!merged) continue;
+    sections.push(wrapSection(categoryTitle, merged));
+  }
+
+  return mergePromptBlocks(sections);
+};
+
+const loadActionCollectorUserTemplate = async (args: {
+  room: RoomLike;
+  providerPlayer: PlayerLike;
+}) => {
+  const functionRoot = FUNCTION_PROMPT_ROOT.actionCollector;
+  const categoryPath = path.resolve(functionRoot, ACTION_COLLECTOR_USER_TEMPLATE_CATEGORY);
+  const templateValues = buildTemplateValues({
+    room: args.room,
+    providerPlayer: args.providerPlayer,
+    functionType: "actionCollector"
+  });
+  const template = await loadCategoryText(categoryPath, templateValues);
+  return template || DEFAULT_ACTION_COLLECTOR_USER_TEMPLATE;
+};
+
+export const buildActionCollectorPromptEnvelope = async (args: {
+  room: RoomLike;
+  providerPlayer: PlayerLike;
+  systemPromptOverride?: string;
+  actionCollectorInputJson: string;
+}) => {
+  const userTemplate = await loadActionCollectorUserTemplate(args);
+  const userPrompt = fillTemplate(userTemplate, {
+    ...buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "actionCollector" }),
+    actionCollectorInputJson: args.actionCollectorInputJson
+  });
+  const systemPrompt = await buildSystemPromptForFunction({
+    room: args.room,
+    providerPlayer: args.providerPlayer,
+    functionType: "actionCollector",
+    systemPromptOverride: args.systemPromptOverride
+  });
 
   return {
-    systemPrompt: [identityPrompt, args.systemPromptBase, corePromptText].filter(Boolean).join("\n\n"),
-    userPrompt: [args.userPromptBody, cotPseudoPrompt].filter(Boolean).join("\n\n"),
-    modelPrompt: args.modelPromptBody
+    systemPrompt,
+    userPrompt,
+    modelPrompt: ""
   };
+};
+
+export const buildMainStoryPromptEnvelope = async (args: {
+  room: RoomLike;
+  providerPlayer: PlayerLike;
+  systemPromptOverride?: string;
+  mainStoryInputJson: string;
+}) => {
+  const systemPrompt = await buildSystemPromptForFunction({
+    room: args.room,
+    providerPlayer: args.providerPlayer,
+    functionType: "mainStory",
+    systemPromptOverride: args.systemPromptOverride
+  });
+  const userPrompt = fillTemplate(DEFAULT_MAIN_STORY_USER_TEMPLATE, {
+    ...buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "mainStory" }),
+    mainStoryInputJson: args.mainStoryInputJson
+  });
+
+  return {
+    systemPrompt,
+    userPrompt,
+    modelPrompt: ""
+  };
+};
+
+export const buildStateProcessorPromptEnvelope = async (args: {
+  room: RoomLike;
+  providerPlayer: PlayerLike;
+  systemPromptOverride?: string;
+  stateProcessorInputJson: string;
+}) => {
+  const systemPrompt = await buildSystemPromptForFunction({
+    room: args.room,
+    providerPlayer: args.providerPlayer,
+    functionType: "stateProcessor",
+    systemPromptOverride: args.systemPromptOverride
+  });
+  const userPrompt = fillTemplate(DEFAULT_STATE_PROCESSOR_USER_TEMPLATE, {
+    ...buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "stateProcessor" }),
+    stateProcessorInputJson: args.stateProcessorInputJson
+  });
+
+  return {
+    systemPrompt,
+    userPrompt,
+    modelPrompt: ""
+  };
+};
+
+const getDefaultTemplateRoom = (): RoomLike => ({
+  id: "default-room",
+  name: "默认房间",
+  intro: "",
+  currentRound: 0,
+  logs: [],
+  players: [],
+  functionRotationIndex: {
+    actionCollector: 0,
+    mainStory: 0,
+    stateProcessor: 0
+  },
+  script: {}
+});
+
+const getDefaultTemplateProvider = (): PlayerLike => ({
+  id: "default-player",
+  name: "默认提供者",
+  action: "",
+  location: "",
+  currentHP: 0,
+  currentMP: 0,
+  statusEffects: [],
+  aiSettings: {
+    defaultProvider: "openaiCompatible",
+    defaultEndpoint: "",
+    defaultApiKey: "",
+    actionCollector: {
+      connection: { provider: "", endpoint: "", apiKey: "", model: "" },
+      prompt: { systemPrompt: "", temperature: 0.3 }
+    },
+    mainStory: {
+      connection: { provider: "", endpoint: "", apiKey: "", model: "" },
+      prompt: { systemPrompt: "", temperature: 0.7 }
+    },
+    stateProcessor: {
+      connection: { provider: "", endpoint: "", apiKey: "", model: "" },
+      prompt: { systemPrompt: "", temperature: 0.1 }
+    }
+  },
+  apiFunctions: {
+    actionCollector: true,
+    mainStory: true,
+    stateProcessor: true
+  }
+});
+
+export const readPromptFile = async (functionType: AIFunctionType, role: PromptRole): Promise<string> => {
+  const defaultRoom = getDefaultTemplateRoom();
+  const defaultProvider = getDefaultTemplateProvider();
+
+  if (role === "model") return "";
+  if (role === "user") {
+    if (functionType === "actionCollector") {
+      return loadActionCollectorUserTemplate({
+        room: defaultRoom,
+        providerPlayer: defaultProvider
+      });
+    }
+    if (functionType === "mainStory") return DEFAULT_MAIN_STORY_USER_TEMPLATE;
+    return DEFAULT_STATE_PROCESSOR_USER_TEMPLATE;
+  }
+
+  return buildSystemPromptForFunction({
+    room: defaultRoom,
+    providerPlayer: defaultProvider,
+    functionType
+  });
 };

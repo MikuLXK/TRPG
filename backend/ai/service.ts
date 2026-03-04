@@ -1,5 +1,11 @@
 import { buildAuthHeaders, callChatCompletion, getModelsUrl, PROVIDER_DEFAULT_ENDPOINTS } from "./chatClient";
-import { buildPromptEnvelope, fillTemplate, readPromptFile, safeJsonParse, trimTextForContext } from "./prompting";
+import {
+  buildActionCollectorPromptEnvelope,
+  buildMainStoryPromptEnvelope,
+  buildStateProcessorPromptEnvelope,
+  readPromptFile,
+  safeJsonParse
+} from "./prompting";
 import {
   buildActionCollectorInput,
   buildMainStoryInput,
@@ -63,30 +69,19 @@ export const validateStartCondition = (room: RoomLike) => {
   return FUNCTION_TYPES.every((fn) => getFunctionProviders(room, fn).length > 0);
 };
 
-const getPromptSystemOverride = async (player: PlayerLike, functionType: AIFunctionType) => {
-  const override = player.aiSettings[functionType].prompt.systemPrompt?.trim();
-  if (override) return override;
-  return readPromptFile(functionType, "system");
+const getPromptSystemOverride = (player: PlayerLike, functionType: AIFunctionType) => {
+  return player.aiSettings[functionType].prompt.systemPrompt?.trim() || "";
 };
 
 export const runActionCollector = async (room: RoomLike): Promise<ActionCollectorPayload> => {
   const providerPlayer = pickProviderByRoundRobin(room, "actionCollector");
   const connection = getEffectiveConnection(providerPlayer, "actionCollector");
-  const [userTemplate, modelTemplate, systemPromptBase] = await Promise.all([
-    readPromptFile("actionCollector", "user"),
-    readPromptFile("actionCollector", "model"),
-    getPromptSystemOverride(providerPlayer, "actionCollector")
-  ]);
-
   const collectorInput = buildActionCollectorInput(room);
-  const userPromptBody = fillTemplate(userTemplate, { actionCollectorInputJson: JSON.stringify(collectorInput, null, 2) });
-  const promptEnvelope = await buildPromptEnvelope({
+  const promptEnvelope = await buildActionCollectorPromptEnvelope({
     room,
     providerPlayer,
-    functionType: "actionCollector",
-    systemPromptBase,
-    userPromptBody,
-    modelPromptBody: modelTemplate
+    systemPromptOverride: getPromptSystemOverride(providerPlayer, "actionCollector"),
+    actionCollectorInputJson: JSON.stringify(collectorInput, null, 2)
   });
   const output = await callChatCompletion({
     provider: connection.provider,
@@ -109,23 +104,12 @@ export const runMainStory = async (
 ): Promise<MainStoryPayload> => {
   const providerPlayer = pickProviderByRoundRobin(room, "mainStory");
   const connection = getEffectiveConnection(providerPlayer, "mainStory");
-  const [userTemplate, modelTemplate, systemPromptBase] = await Promise.all([
-    readPromptFile("mainStory", "user"),
-    readPromptFile("mainStory", "model"),
-    getPromptSystemOverride(providerPlayer, "mainStory")
-  ]);
-
-  const settingPrompt = trimTextForContext(room.script?.settingPrompt || "", 1200);
-  const systemPromptWithSetting = settingPrompt ? `${settingPrompt}\n\n${systemPromptBase}` : systemPromptBase;
   const mainStoryInput = buildMainStoryInput(room, groupedActions);
-  const userPromptBody = fillTemplate(userTemplate, { mainStoryInputJson: JSON.stringify(mainStoryInput, null, 2) });
-  const promptEnvelope = await buildPromptEnvelope({
+  const promptEnvelope = await buildMainStoryPromptEnvelope({
     room,
     providerPlayer,
-    functionType: "mainStory",
-    systemPromptBase: systemPromptWithSetting,
-    userPromptBody,
-    modelPromptBody: modelTemplate
+    systemPromptOverride: getPromptSystemOverride(providerPlayer, "mainStory"),
+    mainStoryInputJson: JSON.stringify(mainStoryInput, null, 2)
   });
   const output = await callChatCompletion({
     provider: connection.provider,
@@ -146,21 +130,12 @@ export const runMainStory = async (
 export const runStateProcessor = async (room: RoomLike, storyPayload: MainStoryPayload, groupedActions: ActionCollectorPayload) => {
   const providerPlayer = pickProviderByRoundRobin(room, "stateProcessor");
   const connection = getEffectiveConnection(providerPlayer, "stateProcessor");
-  const [userTemplate, modelTemplate, systemPromptBase] = await Promise.all([
-    readPromptFile("stateProcessor", "user"),
-    readPromptFile("stateProcessor", "model"),
-    getPromptSystemOverride(providerPlayer, "stateProcessor")
-  ]);
-
   const stateInput = buildStateProcessorInput(room, storyPayload, groupedActions);
-  const userPromptBody = fillTemplate(userTemplate, { stateProcessorInputJson: JSON.stringify(stateInput, null, 2) });
-  const promptEnvelope = await buildPromptEnvelope({
+  const promptEnvelope = await buildStateProcessorPromptEnvelope({
     room,
     providerPlayer,
-    functionType: "stateProcessor",
-    systemPromptBase,
-    userPromptBody,
-    modelPromptBody: modelTemplate
+    systemPromptOverride: getPromptSystemOverride(providerPlayer, "stateProcessor"),
+    stateProcessorInputJson: JSON.stringify(stateInput, null, 2)
   });
   const output = await callChatCompletion({
     provider: connection.provider,

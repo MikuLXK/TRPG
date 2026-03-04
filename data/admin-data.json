@@ -34,7 +34,7 @@
       "createdAt": 1772456101383,
       "status": "active",
       "role": "player",
-      "lastLoginAt": 1772456101383
+      "lastLoginAt": 1772611913148
     },
     {
       "uid": "00005",
@@ -488,6 +488,14 @@
   "workshopScripts": [],
   "cloudSaves": [],
   "logs": [
+    {
+      "id": "1772611913149-5yakmc",
+      "timestamp": 1772611913149,
+      "operator": "1",
+      "action": "player_login",
+      "targetType": "user",
+      "targetId": "1"
+    },
     {
       "id": "1772456113982-ayt7ro",
       "timestamp": 1772456113982,

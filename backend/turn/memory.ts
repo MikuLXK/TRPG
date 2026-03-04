@@ -91,12 +91,18 @@ export const createDefaultRoomMemoryConfig = (): RoomMemoryConfig => ({
 
 export const normalizeRoomMemoryConfig = (raw?: Partial<RoomMemoryConfig> | null): RoomMemoryConfig => {
   const defaults = createDefaultRoomMemoryConfig();
+  const source = (raw || {}) as Record<string, unknown>;
+  const immediateRaw = source.immediateLimit ?? source["即时记忆上限"];
+  const shortRaw = source.shortThreshold ?? source["短期记忆阈值"];
+  const midRaw = source.midThreshold ?? source["中期记忆阈值"];
+  const shortPromptRaw = source.shortToMidPrompt ?? source["短期转中期提示词"];
+  const midPromptRaw = source.midToLongPrompt ?? source["中期转长期提示词"];
   return {
-    immediateLimit: Math.max(3, Number(raw?.immediateLimit) || defaults.immediateLimit),
-    shortThreshold: Math.max(5, Number(raw?.shortThreshold) || defaults.shortThreshold),
-    midThreshold: Math.max(20, Number(raw?.midThreshold) || defaults.midThreshold),
-    shortToMidPrompt: String(raw?.shortToMidPrompt || defaults.shortToMidPrompt).trim(),
-    midToLongPrompt: String(raw?.midToLongPrompt || defaults.midToLongPrompt).trim()
+    immediateLimit: Math.max(3, Number(immediateRaw) || defaults.immediateLimit),
+    shortThreshold: Math.max(5, Number(shortRaw) || defaults.shortThreshold),
+    midThreshold: Math.max(20, Number(midRaw) || defaults.midThreshold),
+    shortToMidPrompt: String(shortPromptRaw || defaults.shortToMidPrompt).trim(),
+    midToLongPrompt: String(midPromptRaw || defaults.midToLongPrompt).trim()
   };
 };
 
@@ -242,12 +248,16 @@ const toNowCanonical = () => {
 
 export const buildRoundMemoryEntries = (args: {
   room: any;
-  storyPayload: any;
+  storyPayload: {
+    globalSummary?: string;
+    shortTerm?: string;
+  };
 }) => {
   const round = Number(args.room?.currentRound) || 1;
   const openingTime = toCanonicalGameTime((args.room as any)?.script?.opening?.initialState?.环境 || {});
   const timeText = round <= 1 ? (openingTime || toNowCanonical()) : toNowCanonical();
   const globalSummary = String(args.storyPayload?.globalSummary || "").trim();
+  const shortTerm = String(args.storyPayload?.shortTerm || "").trim();
   const fallbackSummary = "本回合剧情已推进。";
 
   const immediateEntry = [
@@ -258,7 +268,7 @@ export const buildRoundMemoryEntries = (args: {
     .join("\n")
     .trim();
 
-  const shortEntryBase = globalSummary || fallbackSummary;
+  const shortEntryBase = shortTerm || globalSummary || fallbackSummary;
   const shortEntry = `【${timeText}】${shortEntryBase.replace(/\s+/g, " ").trim()}`.trim();
 
   return { immediateEntry, shortEntry, round, timeText };

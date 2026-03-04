@@ -150,7 +150,11 @@ export const normalizeActionCollectorPayload = (
   return { groups, rawActions, groupNarratives };
 };
 
-export const buildMainStoryInput = (room: RoomLike, groupedActions: ActionCollectorPayload) => {
+export const buildMainStoryInput = (
+  room: RoomLike,
+  groupedActions: ActionCollectorPayload,
+  options?: { rerollPrompt?: string }
+) => {
   const activePlayers = getActivePlayers(room);
   const players = activePlayers.map((player) => ({
     playerId: player.id,
@@ -191,7 +195,8 @@ export const buildMainStoryInput = (room: RoomLike, groupedActions: ActionCollec
     groupedActions,
     players,
     recentLogs,
-    memoryContext
+    memoryContext,
+    rerollPrompt: String(options?.rerollPrompt || "").trim()
   };
 };
 
@@ -233,7 +238,18 @@ export const normalizeMainStoryPayload = (room: RoomLike, groupedActions: Action
     if (!resolvedGroupId || !expectedMap.has(resolvedGroupId) || consumedGroupIds.has(resolvedGroupId)) continue;
     const expected = expectedMap.get(resolvedGroupId)!;
     const title = String(item?.title || "").trim() || buildGroupTitleByPlayerIds(room, expected.playerIds);
-    const content = String(item?.content || "").trim() || "该组行动已发生，但本回合未产生可公开的新叙事结果。";
+    const linesText = Array.isArray((item as any)?.lines)
+      ? (item as any).lines
+          .map((line: any) => {
+            const speaker = String(line?.speaker || "").trim();
+            const text = String(line?.text || "").trim();
+            if (!speaker || !text) return "";
+            return `【${speaker}】${text}`;
+          })
+          .filter(Boolean)
+          .join("\n")
+      : "";
+    const content = String(item?.content || "").trim() || linesText || "该组行动已发生，但本回合未产生可公开的新叙事结果。";
     filledSegments.push({ groupId: resolvedGroupId, visibleToPlayerIds: expected.playerIds, title, content });
     consumedGroupIds.add(resolvedGroupId);
   }
@@ -251,7 +267,24 @@ export const normalizeMainStoryPayload = (room: RoomLike, groupedActions: Action
         .map((item) => ({ playerId: String(item?.playerId || "").trim(), hint: String(item?.hint || "").trim() }))
         .filter((item) => item.playerId && item.hint && room.players.some((player) => player.id === item.playerId))
     : [];
-  return { globalSummary: String(parsed?.globalSummary || "").trim(), segments: filledSegments, nextHints };
+  const thinking = String((parsed as any)?.thinking || "").trim();
+  const shortTerm = String((parsed as any)?.shortTerm || (parsed as any)?.summary || parsed?.globalSummary || "").trim();
+  const publicLines = Array.isArray((parsed as any)?.publicLines)
+    ? (parsed as any).publicLines
+        .map((line: any) => ({
+          speaker: String(line?.speaker || "").trim(),
+          text: String(line?.text || "").trim()
+        }))
+        .filter((line: { speaker: string; text: string }) => line.speaker && line.text)
+    : [];
+  return {
+    thinking,
+    globalSummary: String(parsed?.globalSummary || "").trim(),
+    shortTerm,
+    publicLines,
+    segments: filledSegments,
+    nextHints
+  };
 };
 
 export const normalizeStateProcessorPayload = (room: RoomLike, parsed: { changes?: unknown[] } | null) => {

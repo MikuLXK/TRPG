@@ -79,6 +79,8 @@ interface AIConnectionConfig {
 
 interface AIPromptConfig {
   systemPrompt: string;
+  userPrompt?: string;
+  modelPrompt?: string;
   temperature: number;
 }
 
@@ -157,6 +159,24 @@ interface Room {
   memoryConfig: ReturnType<typeof createDefaultRoomMemoryConfig>;
   memorySystem: ReturnType<typeof createEmptyRoomMemorySystem>;
   memoryPendingTask: ReturnType<typeof buildMemoryTask> | null;
+  aiThinkingHistory: Array<{
+    round: number;
+    thinking: string;
+    source: "mainStory" | "reroll";
+    time: string;
+  }>;
+  lastTurnSnapshot: {
+    round: number;
+    groupedActions: any;
+  } | null;
+  rerollVote: {
+    id: string;
+    round: number;
+    prompt: string;
+    requesterId: string;
+    approvals: string[];
+    rejections: string[];
+  } | null;
   sharedAssets: {
     script?: SharedAssetEnvelope<ScriptDefinition>;
     save?: SharedAssetEnvelope<any>;
@@ -171,15 +191,15 @@ const defaultAISettings: PlayerAISettings = {
   defaultApiKey: "",
   actionCollector: {
     connection: { provider: "", endpoint: "", apiKey: "", model: "gpt-4o-mini" },
-    prompt: { temperature: 0.3, systemPrompt: "" }
+    prompt: { temperature: 0.3, systemPrompt: "", userPrompt: "", modelPrompt: "" }
   },
   mainStory: {
     connection: { provider: "", endpoint: "", apiKey: "", model: "gpt-4o" },
-    prompt: { temperature: 0.7, systemPrompt: "" }
+    prompt: { temperature: 0.7, systemPrompt: "", userPrompt: "", modelPrompt: "" }
   },
   stateProcessor: {
     connection: { provider: "", endpoint: "", apiKey: "", model: "gpt-4o-mini" },
-    prompt: { temperature: 0.1, systemPrompt: "" }
+    prompt: { temperature: 0.1, systemPrompt: "", userPrompt: "", modelPrompt: "" }
   }
 };
 
@@ -1099,6 +1119,7 @@ registerSocketHandlers({
   claimSavedCharacterForPlayer,
   setPlayerCustomCharacterMode,
   validateStartCondition,
+  runMainStory,
   runMemorySummary,
   normalizeRoomMemoryConfig,
   normalizeRoomMemorySystem,

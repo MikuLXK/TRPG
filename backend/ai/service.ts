@@ -73,6 +73,14 @@ const getPromptSystemOverride = (player: PlayerLike, functionType: AIFunctionTyp
   return player.aiSettings[functionType].prompt.systemPrompt?.trim() || "";
 };
 
+const getPromptUserOverride = (player: PlayerLike, functionType: AIFunctionType) => {
+  return String((player.aiSettings[functionType].prompt as any)?.userPrompt || "").trim();
+};
+
+const getPromptModelOverride = (player: PlayerLike, functionType: AIFunctionType) => {
+  return String((player.aiSettings[functionType].prompt as any)?.modelPrompt || "").trim();
+};
+
 export const runActionCollector = async (room: RoomLike): Promise<ActionCollectorPayload> => {
   const providerPlayer = pickProviderByRoundRobin(room, "actionCollector");
   const connection = getEffectiveConnection(providerPlayer, "actionCollector");
@@ -81,6 +89,8 @@ export const runActionCollector = async (room: RoomLike): Promise<ActionCollecto
     room,
     providerPlayer,
     systemPromptOverride: getPromptSystemOverride(providerPlayer, "actionCollector"),
+    userPromptOverride: getPromptUserOverride(providerPlayer, "actionCollector"),
+    modelPromptOverride: getPromptModelOverride(providerPlayer, "actionCollector"),
     actionCollectorInputJson: JSON.stringify(collectorInput, null, 2)
   });
   const output = await callChatCompletion({
@@ -100,15 +110,17 @@ export const runActionCollector = async (room: RoomLike): Promise<ActionCollecto
 export const runMainStory = async (
   room: RoomLike,
   groupedActions: ActionCollectorPayload,
-  options?: { stream?: boolean; onStreamChunk?: (chunk: string) => void }
+  options?: { stream?: boolean; onStreamChunk?: (chunk: string) => void; rerollPrompt?: string }
 ): Promise<MainStoryPayload> => {
   const providerPlayer = pickProviderByRoundRobin(room, "mainStory");
   const connection = getEffectiveConnection(providerPlayer, "mainStory");
-  const mainStoryInput = buildMainStoryInput(room, groupedActions);
+  const mainStoryInput = buildMainStoryInput(room, groupedActions, { rerollPrompt: options?.rerollPrompt });
   const promptEnvelope = await buildMainStoryPromptEnvelope({
     room,
     providerPlayer,
     systemPromptOverride: getPromptSystemOverride(providerPlayer, "mainStory"),
+    userPromptOverride: getPromptUserOverride(providerPlayer, "mainStory"),
+    modelPromptOverride: getPromptModelOverride(providerPlayer, "mainStory"),
     mainStoryInputJson: JSON.stringify(mainStoryInput, null, 2)
   });
   const output = await callChatCompletion({
@@ -135,6 +147,8 @@ export const runStateProcessor = async (room: RoomLike, storyPayload: MainStoryP
     room,
     providerPlayer,
     systemPromptOverride: getPromptSystemOverride(providerPlayer, "stateProcessor"),
+    userPromptOverride: getPromptUserOverride(providerPlayer, "stateProcessor"),
+    modelPromptOverride: getPromptModelOverride(providerPlayer, "stateProcessor"),
     stateProcessorInputJson: JSON.stringify(stateInput, null, 2)
   });
   const output = await callChatCompletion({
@@ -157,11 +171,19 @@ export const runMemorySummary = async (args: {
   userPrompt: string;
   temperature?: number;
 }) => {
-  const requester = getActivePlayers(args.room).find((player) => player.id === args.requesterId);
+  const activePlayers = getActivePlayers(args.room);
+  const requester = activePlayers.find((player) => player.id === args.requesterId);
   if (!requester) {
     throw new Error("当前玩家不在房间中，无法执行记忆总结");
   }
-  const connection = getEffectiveConnection(requester, "mainStory");
+  const isConnectionUsable = (player: PlayerLike) => {
+    const conn = getEffectiveConnection(player, "mainStory");
+    return Boolean(String(conn.endpoint || "").trim()) && Boolean(String(conn.model || "").trim());
+  };
+  const providerPlayer = isConnectionUsable(requester)
+    ? requester
+    : activePlayers.find((player) => player.apiFunctions.mainStory && isConnectionUsable(player)) || requester;
+  const connection = getEffectiveConnection(providerPlayer, "mainStory");
   const output = await callChatCompletion({
     provider: connection.provider,
     endpoint: connection.endpoint,
@@ -169,7 +191,7 @@ export const runMemorySummary = async (args: {
     model: connection.model,
     temperature: Number.isFinite(Number(args.temperature))
       ? Number(args.temperature)
-      : requester.aiSettings.mainStory.prompt.temperature,
+      : providerPlayer.aiSettings.mainStory.prompt.temperature,
     systemPrompt: String(args.systemPrompt || "").trim(),
     userPrompt: String(args.userPrompt || "").trim(),
     modelPrompt: ""

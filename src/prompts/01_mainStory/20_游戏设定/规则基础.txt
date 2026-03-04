@@ -10,6 +10,7 @@
   "thinking": string,
   "round": number,
   "globalSummary": string,
+  "shortTerm": string,
   "publicLines": Line[],
   "segments": Segment[]
 }
@@ -53,5 +54,6 @@ Segment:
 ## 6. 四段记忆利用（强制）
 - 输入会提供 `memoryContext`，包含 `长期记忆/中期记忆/短期记忆/即时记忆`。
 - 生成剧情前必须先在 `thinking` 内检索可复用的记忆事实，确保跨回合连续性。
+- `shortTerm` 必须是“本回合正文摘要”，长度建议 60~120 字，用于短期记忆写入。
 - 当本回合出现关键推进时，必须在 `globalSummary` 中明确写出结果与影响，供记忆系统压缩使用。
 </输出结构与指令场景>

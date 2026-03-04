@@ -60,6 +60,8 @@ const mergeSettings = (base: GameSettings, saved: Partial<GameSettings>): GameSe
       if (!savedAI) return;
 
       const savedSystemPrompt = savedAI.prompt?.systemPrompt;
+      const savedUserPrompt = savedAI.prompt?.userPrompt;
+      const savedModelPrompt = savedAI.prompt?.modelPrompt;
 
       merged.ai[key] = {
         connection: {
@@ -73,6 +75,10 @@ const mergeSettings = (base: GameSettings, saved: Partial<GameSettings>): GameSe
             typeof savedSystemPrompt === 'string' && savedSystemPrompt.trim().length > 0
               ? savedSystemPrompt
               : merged.ai[key].prompt.systemPrompt,
+          userPrompt:
+            typeof savedUserPrompt === 'string' ? savedUserPrompt : (merged.ai[key].prompt.userPrompt || ''),
+          modelPrompt:
+            typeof savedModelPrompt === 'string' ? savedModelPrompt : (merged.ai[key].prompt.modelPrompt || ''),
         },
       };
     });
@@ -123,9 +129,17 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
         setPromptDefaults(defaults as PromptDefaults);
 
         AI_KEYS.forEach((key) => {
-          const prompt = defaults?.[key]?.system;
-          if (typeof prompt === 'string' && prompt.trim().length > 0) {
-            nextSettings.ai[key].prompt.systemPrompt = prompt;
+          const systemPrompt = defaults?.[key]?.system;
+          const userPrompt = defaults?.[key]?.user;
+          const modelPrompt = defaults?.[key]?.model;
+          if (typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
+            nextSettings.ai[key].prompt.systemPrompt = systemPrompt;
+          }
+          if (typeof userPrompt === 'string') {
+            nextSettings.ai[key].prompt.userPrompt = userPrompt;
+          }
+          if (typeof modelPrompt === 'string') {
+            nextSettings.ai[key].prompt.modelPrompt = modelPrompt;
           }
         });
       } catch {
@@ -364,8 +378,10 @@ function PromptSettings({
 
   const getAIPrompt = (type: AIFunctionType) => settings.ai[type].prompt;
 
-  const resetSystemPrompt = () => {
-    const fallback = promptDefaults?.[activeAI]?.system || '';
+  const resetPromptDefaults = () => {
+    const fallbackSystem = promptDefaults?.[activeAI]?.system || '';
+    const fallbackUser = promptDefaults?.[activeAI]?.user || '';
+    const fallbackModel = promptDefaults?.[activeAI]?.model || '';
     onChange((prev) => ({
       ...prev,
       ai: {
@@ -374,7 +390,9 @@ function PromptSettings({
           ...prev.ai[activeAI],
           prompt: {
             ...prev.ai[activeAI].prompt,
-            systemPrompt: fallback,
+            systemPrompt: fallbackSystem,
+            userPrompt: fallbackUser,
+            modelPrompt: fallbackModel
           },
         },
       },
@@ -385,7 +403,7 @@ function PromptSettings({
     <div className="space-y-6 h-full flex flex-col">
       <div className="flex justify-between items-center">
         <h3 className="text-zinc-200 font-bold">AI 提示词配置</h3>
-        <button onClick={resetSystemPrompt} className="flex items-center gap-2 text-xs text-amber-500 hover:text-amber-400 transition-colors">
+        <button onClick={resetPromptDefaults} className="flex items-center gap-2 text-xs text-amber-500 hover:text-amber-400 transition-colors">
           <RefreshCw size={14} /> 重置默认
         </button>
       </div>
@@ -427,7 +445,7 @@ function PromptSettings({
         <div className="flex-1 flex flex-col gap-2">
           <label className="text-sm text-zinc-400">系统提示词 (System Prompt)</label>
           <textarea
-            className="flex-1 w-full bg-zinc-900 border border-zinc-700 rounded-xl p-4 text-zinc-300 font-mono text-sm focus:border-amber-500 outline-none resize-none custom-scrollbar leading-relaxed"
+            className="h-44 w-full bg-zinc-900 border border-zinc-700 rounded-xl p-4 text-zinc-300 font-mono text-sm focus:border-amber-500 outline-none resize-none custom-scrollbar leading-relaxed"
             value={getAIPrompt(activeAI).systemPrompt}
             onChange={(e) => {
               const value = e.target.value;
@@ -440,6 +458,54 @@ function PromptSettings({
                     prompt: {
                       ...prev.ai[activeAI].prompt,
                       systemPrompt: value,
+                    },
+                  },
+                },
+              }));
+            }}
+          />
+        </div>
+
+        <div className="flex-1 flex flex-col gap-2">
+          <label className="text-sm text-zinc-400">用户提示词覆盖 (User Prompt Override)</label>
+          <textarea
+            className="h-36 w-full bg-zinc-900 border border-zinc-700 rounded-xl p-4 text-zinc-300 font-mono text-sm focus:border-amber-500 outline-none resize-none custom-scrollbar leading-relaxed"
+            value={getAIPrompt(activeAI).userPrompt || ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              onChange((prev) => ({
+                ...prev,
+                ai: {
+                  ...prev.ai,
+                  [activeAI]: {
+                    ...prev.ai[activeAI],
+                    prompt: {
+                      ...prev.ai[activeAI].prompt,
+                      userPrompt: value,
+                    },
+                  },
+                },
+              }));
+            }}
+          />
+        </div>
+
+        <div className="flex-1 flex flex-col gap-2">
+          <label className="text-sm text-zinc-400">模型提示词覆盖 (Model Prompt Override)</label>
+          <textarea
+            className="h-24 w-full bg-zinc-900 border border-zinc-700 rounded-xl p-4 text-zinc-300 font-mono text-sm focus:border-amber-500 outline-none resize-none custom-scrollbar leading-relaxed"
+            value={getAIPrompt(activeAI).modelPrompt || ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              onChange((prev) => ({
+                ...prev,
+                ai: {
+                  ...prev.ai,
+                  [activeAI]: {
+                    ...prev.ai[activeAI],
+                    prompt: {
+                      ...prev.ai[activeAI].prompt,
+                      modelPrompt: value,
                     },
                   },
                 },

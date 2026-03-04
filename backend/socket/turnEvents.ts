@@ -1,4 +1,5 @@
 import { applyMemorySummary, buildMemorySummaryUserPrompt, cleanupSummaryOutput } from "../turn/memory";
+import { composeStoryByPlayer } from "../turn/storyDispatch";
 
 export const registerTurnEvents = (socket: any, deps: {
   rooms: Record<string, any>;
@@ -6,6 +7,11 @@ export const registerTurnEvents = (socket: any, deps: {
   getActivePlayers: (room: any) => Array<any>;
   processTurn: (roomId: string) => void;
   removePlayerFromRoom: (socketId: string) => void;
+  runMainStory: (
+    room: any,
+    groupedActions: any,
+    options?: { stream?: boolean; onStreamChunk?: (chunk: string) => void; rerollPrompt?: string }
+  ) => Promise<any>;
   runMemorySummary: (args: {
     room: any;
     requesterId: string;
@@ -17,6 +23,102 @@ export const registerTurnEvents = (socket: any, deps: {
   normalizeRoomMemorySystem: (raw?: any) => any;
   buildMemoryTask: (memoryBase: any, configBase: any) => any;
 }) => {
+  const getVoteStatusByPlayer = (room: any) => {
+    const vote = room?.rerollVote;
+    const players = deps.getActivePlayers(room);
+    return players.map((p: any) => ({
+      playerId: p.id,
+      playerName: p.name,
+      status: vote?.approvals?.includes(p.id) ? "approved" : vote?.rejections?.includes(p.id) ? "rejected" : "pending"
+    }));
+  };
+
+  const emitVoteUpdate = (roomId: string, room: any) => {
+    deps.io.to(roomId).emit("reroll_vote_updated", {
+      vote: room?.rerollVote || null,
+      players: getVoteStatusByPlayer(room)
+    });
+    deps.io.to(roomId).emit("room_updated", room);
+  };
+
+  const ensureRerollState = (room: any) => {
+    if (!Array.isArray(room.aiThinkingHistory)) room.aiThinkingHistory = [];
+    if (typeof room.lastTurnSnapshot === "undefined") room.lastTurnSnapshot = null;
+    if (typeof room.rerollVote === "undefined") room.rerollVote = null;
+  };
+
+  const executeReroll = async (roomId: string, room: any) => {
+    ensureRerollState(room);
+    const vote = room.rerollVote;
+    const snapshot = room.lastTurnSnapshot;
+    if (!vote || !snapshot) return;
+
+    const useProviderStream = room.streamingMode === "provider";
+    try {
+      room.status = "story_generation";
+      emitVoteUpdate(roomId, room);
+      deps.io.emit("rooms_list_updated");
+
+      if (useProviderStream) deps.io.to(roomId).emit("story_stream_start");
+      const storyPayload = await deps.runMainStory(room, snapshot.groupedActions, {
+        stream: useProviderStream,
+        rerollPrompt: vote.prompt,
+        onStreamChunk: (chunk) => {
+          if (!useProviderStream || !chunk) return;
+          deps.io.to(roomId).emit("story_stream_chunk", { chunk });
+        }
+      });
+      if (useProviderStream) deps.io.to(roomId).emit("story_stream_end");
+
+      const thinking = String(storyPayload?.thinking || "").trim();
+      if (thinking) {
+        room.aiThinkingHistory.push({
+          round: Number(snapshot.round) || Number(room.currentRound) || 1,
+          thinking,
+          source: "reroll",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        });
+        if (room.aiThinkingHistory.length > 60) {
+          room.aiThinkingHistory = room.aiThinkingHistory.slice(-60);
+        }
+      }
+
+      const storyByPlayer = composeStoryByPlayer({
+        room,
+        groupedActions: snapshot.groupedActions,
+        storyPayload
+      });
+      room.players.forEach((player: any) => {
+        const story = (storyByPlayer[player.id] || "").trim() || "重Roll后仍无可见剧情。";
+        deps.io.to(player.id).emit("player_story", {
+          story: `【重Roll】\n${story}`,
+          round: Number(snapshot.round) || Number(room.currentRound) || 1
+        });
+      });
+
+      room.logs.push({
+        id: `${Date.now()}-reroll`,
+        发送者: "系统",
+        内容: `重Roll完成：${String(storyPayload?.shortTerm || storyPayload?.globalSummary || "").trim() || "已重新生成剧情"}`,
+        类型: "系统",
+        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      });
+
+      room.rerollVote = null;
+      room.status = "waiting";
+      emitVoteUpdate(roomId, room);
+      deps.io.to(roomId).emit("reroll_completed", { roomId, round: snapshot.round });
+      deps.io.emit("rooms_list_updated");
+    } catch (error) {
+      if (useProviderStream) deps.io.to(roomId).emit("story_stream_end");
+      room.status = "waiting";
+      room.rerollVote = null;
+      emitVoteUpdate(roomId, room);
+      deps.io.to(roomId).emit("error", `重Roll失败: ${String((error as Error)?.message || error)}`);
+      deps.io.emit("rooms_list_updated");
+    }
+  };
+
   socket.on("set_room_streaming_mode", ({ roomId, mode }: { roomId: string; mode: "off" | "provider" }) => {
     const room = deps.rooms[roomId];
     if (!room) return;
@@ -48,6 +150,10 @@ export const registerTurnEvents = (socket: any, deps: {
     if (!room) return;
     const player = room.players.find((p: any) => p.id === socket.id);
     if (!player) return;
+    if (room.rerollVote) {
+      socket.emit("error", "重Roll投票进行中，请先完成投票");
+      return;
+    }
     if (player.isReady) return;
 
     player.action = action;
@@ -79,6 +185,132 @@ export const registerTurnEvents = (socket: any, deps: {
     room.memorySystem = deps.normalizeRoomMemorySystem(room.memorySystem);
     room.memoryPendingTask = deps.buildMemoryTask(room.memorySystem, room.memoryConfig);
     deps.io.to(roomId).emit("room_updated", room);
+  });
+
+  socket.on(
+    "request_reroll",
+    (
+      {
+        roomId,
+        prompt
+      }: {
+        roomId: string;
+        prompt?: string;
+      },
+      callback?: (payload: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      ensureRerollState(room);
+      if (!room.hasStarted) {
+        callback?.({ ok: false, error: "游戏未开始，不能重Roll" });
+        return;
+      }
+      if (room.status !== "waiting") {
+        callback?.({ ok: false, error: "当前不在等待阶段，暂不能重Roll" });
+        return;
+      }
+      if (!room.lastTurnSnapshot || !room.lastTurnSnapshot.groupedActions) {
+        callback?.({ ok: false, error: "暂无可重Roll的回合快照" });
+        return;
+      }
+      if (room.rerollVote) {
+        callback?.({ ok: false, error: "已有重Roll投票进行中" });
+        return;
+      }
+      const voteId = `reroll-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      room.rerollVote = {
+        id: voteId,
+        round: Number(room.lastTurnSnapshot.round) || Number(room.currentRound) || 1,
+        prompt: String(prompt || "").trim(),
+        requesterId: socket.id,
+        approvals: [socket.id],
+        rejections: []
+      };
+      emitVoteUpdate(roomId, room);
+      const active = deps.getActivePlayers(room);
+      callback?.({ ok: true });
+      if (active.length <= 1) {
+        void executeReroll(roomId, room);
+      }
+    }
+  );
+
+  socket.on(
+    "respond_reroll_vote",
+    (
+      {
+        roomId,
+        approve
+      }: {
+        roomId: string;
+        approve: boolean;
+      },
+      callback?: (payload: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      ensureRerollState(room);
+      const vote = room.rerollVote;
+      if (!vote) {
+        callback?.({ ok: false, error: "当前没有进行中的重Roll投票" });
+        return;
+      }
+      const hasVoted = vote.approvals.includes(socket.id) || vote.rejections.includes(socket.id);
+      if (hasVoted) {
+        callback?.({ ok: false, error: "你已经投过票" });
+        return;
+      }
+      if (approve) {
+        vote.approvals.push(socket.id);
+      } else {
+        vote.rejections.push(socket.id);
+      }
+
+      if (vote.rejections.length > 0) {
+        room.rerollVote = null;
+        emitVoteUpdate(roomId, room);
+        callback?.({ ok: true });
+        return;
+      }
+
+      const activePlayerIds = deps.getActivePlayers(room).map((p: any) => p.id);
+      const allApproved = activePlayerIds.every((id: string) => vote.approvals.includes(id));
+      emitVoteUpdate(roomId, room);
+      callback?.({ ok: true });
+      if (allApproved) {
+        void executeReroll(roomId, room);
+      }
+    }
+  );
+
+  socket.on("cancel_reroll_vote", ({ roomId }: { roomId: string }) => {
+    const room = deps.rooms[roomId];
+    if (!room) return;
+    const player = room.players.find((p: any) => p.id === socket.id);
+    if (!player) return;
+    ensureRerollState(room);
+    const vote = room.rerollVote;
+    if (!vote) return;
+    if (vote.requesterId !== socket.id && room.hostId !== socket.id) return;
+    room.rerollVote = null;
+    emitVoteUpdate(roomId, room);
   });
 
   socket.on("memory_summary_generate", async (

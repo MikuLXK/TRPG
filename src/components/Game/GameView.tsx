@@ -476,6 +476,10 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
   const worldInfo = useMemo<游戏世界观>(() => {
     return buildWorldInfoFromTree(游戏数据, roomState?.script);
   }, [游戏数据, roomState?.script]);
+  const selfRoomPlayer = useMemo(
+    () => resolveSelfPlayer(roomState?.players || [], accountUsername),
+    [roomState?.players, accountUsername]
+  );
 
   useEffect(() => {
     const socket = socketService.socket;
@@ -755,6 +759,21 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     set记忆总结错误('');
   };
 
+  const 发起重Roll = async (prompt: string) => {
+    if (!roomState?.id) return { ok: false, error: '房间不存在' };
+    return socketService.requestReroll({ roomId: roomState.id, prompt });
+  };
+
+  const 投票重Roll = async (approve: boolean) => {
+    if (!roomState?.id) return { ok: false, error: '房间不存在' };
+    return socketService.respondRerollVote({ roomId: roomState.id, approve });
+  };
+
+  const 取消重Roll = () => {
+    if (!roomState?.id) return;
+    socketService.cancelRerollVote(roomState.id);
+  };
+
   const actionLogs = 游戏数据.日志列表.filter((log) => log.类型 !== 'OOC');
   const chatLogs = 游戏数据.日志列表.filter((log) => log.类型 === 'OOC');
   const memorySystem: 记忆系统结构 = useMemo(
@@ -803,10 +822,16 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
               onSendChat={handleSendChat}
               onOpenSettings={() => setIsSettingsOpen(true)}
               players={roomState?.players || []}
+              roomState={roomState}
+              gameData={游戏数据}
               memorySystem={memorySystem}
               memoryPendingTask={待处理记忆总结任务}
               memorySummaryStage={记忆总结阶段}
               onOpenMemorySummary={打开记忆总结}
+              selfPlayerId={String(selfRoomPlayer?.id || '')}
+              onRequestReroll={发起重Roll}
+              onRespondReroll={投票重Roll}
+              onCancelReroll={取消重Roll}
             />
           </div>
         </div>

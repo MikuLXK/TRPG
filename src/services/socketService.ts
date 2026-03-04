@@ -105,6 +105,34 @@ class SocketService {
     this.socket?.emit("memory_summary_dismiss", { roomId, taskId });
   }
 
+  requestReroll(args: { roomId: string; prompt?: string }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("request_reroll", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "重Roll请求无响应" });
+      });
+    });
+  }
+
+  respondRerollVote(args: { roomId: string; approve: boolean }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("respond_reroll_vote", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "重Roll投票无响应" });
+      });
+    });
+  }
+
+  cancelRerollVote(roomId: string) {
+    this.socket?.emit("cancel_reroll_vote", { roomId });
+  }
+
   togglePlayerAIFunction(roomId: string, functionType: AIFunctionType) {
     this.socket?.emit("toggle_player_ai_function", { roomId, functionType });
   }

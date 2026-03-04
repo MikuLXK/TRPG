@@ -24,6 +24,11 @@ export const registerSocketHandlers = (deps: {
   claimSavedCharacterForPlayer: (room: any, player: any, characterId: string) => void;
   setPlayerCustomCharacterMode: (room: any, player: any, enabled: boolean) => void;
   validateStartCondition: (room: any) => boolean;
+  runMainStory: (
+    room: any,
+    groupedActions: any,
+    options?: { stream?: boolean; onStreamChunk?: (chunk: string) => void; rerollPrompt?: string }
+  ) => Promise<any>;
   runMemorySummary: (args: {
     room: any;
     requesterId: string;
@@ -80,6 +85,7 @@ export const registerSocketHandlers = (deps: {
       getActivePlayers: deps.getActivePlayers,
       processTurn: deps.processTurn,
       removePlayerFromRoom: deps.removePlayerFromRoom,
+      runMainStory: deps.runMainStory,
       runMemorySummary: deps.runMemorySummary,
       normalizeRoomMemoryConfig: deps.normalizeRoomMemoryConfig,
       normalizeRoomMemorySystem: deps.normalizeRoomMemorySystem,

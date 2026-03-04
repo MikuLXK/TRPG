@@ -35,6 +35,9 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
     if (typeof room.memoryPendingTask === "undefined") {
       room.memoryPendingTask = buildMemoryTask(room.memorySystem, room.memoryConfig);
     }
+    if (!Array.isArray(room.aiThinkingHistory)) room.aiThinkingHistory = [];
+    if (typeof room.lastTurnSnapshot === "undefined") room.lastTurnSnapshot = null;
+    if (typeof room.rerollVote === "undefined") room.rerollVote = null;
   };
 
   const collectUsedSlots = (room: any) => {
@@ -164,6 +167,9 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       memoryConfig: createDefaultRoomMemoryConfig(),
       memorySystem: createEmptyRoomMemorySystem(),
       memoryPendingTask: buildMemoryTask(createEmptyRoomMemorySystem(), createDefaultRoomMemoryConfig()),
+      aiThinkingHistory: [],
+      lastTurnSnapshot: null,
+      rerollVote: null,
       sharedAssets: {
         script: {
           assetType: "script",

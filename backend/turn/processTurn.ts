@@ -5,6 +5,7 @@ import {
   normalizeRoomMemorySystem,
   writeRoomMemory
 } from "./memory";
+import { composeStoryByPlayer } from "./storyDispatch";
 
 interface StorySegmentLike {
   groupId: string;
@@ -19,7 +20,10 @@ interface StoryHintLike {
 }
 
 interface StoryPayloadLike {
+  thinking?: string;
   globalSummary?: string;
+  shortTerm?: string;
+  publicLines?: Array<{ speaker?: string; text?: string }>;
   segments?: StorySegmentLike[];
   nextHints?: StoryHintLike[];
 }
@@ -63,6 +67,11 @@ export const createTurnProcessor = (deps: {
         deps.io.to(roomId).emit("story_stream_start");
       }
       const groupedActions = await deps.runActionCollector(room);
+      room.rerollVote = null;
+      room.lastTurnSnapshot = {
+        round: Number(room.currentRound) || 1,
+        groupedActions: JSON.parse(JSON.stringify(groupedActions))
+      };
       room.status = "story_generation";
       deps.io.to(roomId).emit("room_updated", room);
       deps.io.emit("rooms_list_updated");
@@ -93,64 +102,29 @@ export const createTurnProcessor = (deps: {
       });
       room.memoryConfig = memoryConfig;
       room.memoryPendingTask = buildMemoryTask(room.memorySystem, memoryConfig);
+      if (!Array.isArray(room.aiThinkingHistory)) room.aiThinkingHistory = [];
+      const thinking = String(storyPayload?.thinking || "").trim();
+      if (thinking) {
+        room.aiThinkingHistory.push({
+          round: Number(room.currentRound) || 1,
+          thinking,
+          source: "mainStory",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        });
+        if (room.aiThinkingHistory.length > 60) {
+          room.aiThinkingHistory = room.aiThinkingHistory.slice(-60);
+        }
+      }
       room.status = "settlement";
       deps.io.to(roomId).emit("room_updated", room);
       deps.io.emit("rooms_list_updated");
 
-      const storyByPlayer: Record<string, string> = {};
       const globalSummary = typeof storyPayload.globalSummary === "string" ? storyPayload.globalSummary.trim() : "";
-      for (const player of room.players) {
-        storyByPlayer[player.id] = globalSummary ? `${globalSummary}\n\n` : "";
-      }
-
-      const groupPlayerMap = new Map<string, string[]>();
-      for (const g of groupedActions.groups || []) {
-        if (!g?.groupId) continue;
-        groupPlayerMap.set(g.groupId, Array.isArray(g.playerIds) ? g.playerIds : []);
-      }
-
-      const nameToId = new Map<string, string>();
-      for (const a of groupedActions.rawActions || []) {
-        const name = String(a?.playerName || "").trim();
-        const id = String(a?.playerId || "").trim();
-        if (name && id) nameToId.set(name, id);
-      }
-      for (const p of room.players) {
-        if (p.name && p.id) nameToId.set(p.name, p.id);
-      }
-
-      for (const seg of storyPayload.segments || []) {
-        const title = (seg.title || "").trim();
-        const content = (seg.content || "").trim();
-        const block = [title, content].filter(Boolean).join("\n").trim();
-        if (!block) continue;
-
-        const directIds = Array.isArray(seg.visibleToPlayerIds) ? seg.visibleToPlayerIds : [];
-        let resolvedIds = directIds.filter((id) => room.players.some((p: any) => p.id === id));
-        if (resolvedIds.length === 0 && seg.groupId && groupPlayerMap.has(seg.groupId)) {
-          resolvedIds = (groupPlayerMap.get(seg.groupId) || []).filter((id) => room.players.some((p: any) => p.id === id));
-        }
-        if (resolvedIds.length === 0 && title) {
-          const titleNames = Array.from(title.matchAll(/【([^\]]+)】/g)).map((m) => String(m[1] || "").trim()).filter(Boolean);
-          resolvedIds = titleNames.map((n) => nameToId.get(n) || "").filter((id) => Boolean(id) && room.players.some((p: any) => p.id === id));
-        }
-        if (resolvedIds.length === 0) resolvedIds = room.players.map((p: any) => p.id);
-
-        for (const playerId of resolvedIds) {
-          if (!storyByPlayer[playerId]) storyByPlayer[playerId] = "";
-          storyByPlayer[playerId] += `${block}\n\n`;
-        }
-      }
-
-      if (Array.isArray(storyPayload.nextHints)) {
-        for (const hintItem of storyPayload.nextHints) {
-          if (!hintItem || typeof hintItem.playerId !== "string") continue;
-          const hint = typeof hintItem.hint === "string" ? hintItem.hint.trim() : "";
-          if (!hint) continue;
-          if (!storyByPlayer[hintItem.playerId]) storyByPlayer[hintItem.playerId] = "";
-          storyByPlayer[hintItem.playerId] += `【下一步可选行动提示】${hint}\n`;
-        }
-      }
+      const storyByPlayer = composeStoryByPlayer({
+        room,
+        groupedActions,
+        storyPayload
+      });
 
       room.players.forEach((player: any) => {
         const personalStory = (storyByPlayer[player.id] || "").trim() || "本回合没有你的可见剧情。";

@@ -209,13 +209,16 @@ export const buildActionCollectorPromptEnvelope = async (args: {
   room: RoomLike;
   providerPlayer: PlayerLike;
   systemPromptOverride?: string;
+  userPromptOverride?: string;
+  modelPromptOverride?: string;
   actionCollectorInputJson: string;
 }) => {
-  const userTemplate = await loadActionCollectorUserTemplate(args);
+  const userTemplate = String(args.userPromptOverride || "").trim() || await loadActionCollectorUserTemplate(args);
   const userPrompt = fillTemplate(userTemplate, {
     ...buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "actionCollector" }),
     actionCollectorInputJson: args.actionCollectorInputJson
   });
+  const modelPromptTemplate = String(args.modelPromptOverride || "").trim();
   const systemPrompt = await buildSystemPromptForFunction({
     room: args.room,
     providerPlayer: args.providerPlayer,
@@ -226,7 +229,7 @@ export const buildActionCollectorPromptEnvelope = async (args: {
   return {
     systemPrompt,
     userPrompt,
-    modelPrompt: ""
+    modelPrompt: fillTemplate(modelPromptTemplate, buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "actionCollector" }))
   };
 };
 
@@ -234,6 +237,8 @@ export const buildMainStoryPromptEnvelope = async (args: {
   room: RoomLike;
   providerPlayer: PlayerLike;
   systemPromptOverride?: string;
+  userPromptOverride?: string;
+  modelPromptOverride?: string;
   mainStoryInputJson: string;
 }) => {
   const systemPrompt = await buildSystemPromptForFunction({
@@ -242,15 +247,17 @@ export const buildMainStoryPromptEnvelope = async (args: {
     functionType: "mainStory",
     systemPromptOverride: args.systemPromptOverride
   });
-  const userPrompt = fillTemplate(DEFAULT_MAIN_STORY_USER_TEMPLATE, {
+  const userTemplate = String(args.userPromptOverride || "").trim() || DEFAULT_MAIN_STORY_USER_TEMPLATE;
+  const userPrompt = fillTemplate(userTemplate, {
     ...buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "mainStory" }),
     mainStoryInputJson: args.mainStoryInputJson
   });
+  const modelPromptTemplate = String(args.modelPromptOverride || "").trim();
 
   return {
     systemPrompt,
     userPrompt,
-    modelPrompt: ""
+    modelPrompt: fillTemplate(modelPromptTemplate, buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "mainStory" }))
   };
 };
 
@@ -258,6 +265,8 @@ export const buildStateProcessorPromptEnvelope = async (args: {
   room: RoomLike;
   providerPlayer: PlayerLike;
   systemPromptOverride?: string;
+  userPromptOverride?: string;
+  modelPromptOverride?: string;
   stateProcessorInputJson: string;
 }) => {
   const systemPrompt = await buildSystemPromptForFunction({
@@ -266,15 +275,17 @@ export const buildStateProcessorPromptEnvelope = async (args: {
     functionType: "stateProcessor",
     systemPromptOverride: args.systemPromptOverride
   });
-  const userPrompt = fillTemplate(DEFAULT_STATE_PROCESSOR_USER_TEMPLATE, {
+  const userTemplate = String(args.userPromptOverride || "").trim() || DEFAULT_STATE_PROCESSOR_USER_TEMPLATE;
+  const userPrompt = fillTemplate(userTemplate, {
     ...buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "stateProcessor" }),
     stateProcessorInputJson: args.stateProcessorInputJson
   });
+  const modelPromptTemplate = String(args.modelPromptOverride || "").trim();
 
   return {
     systemPrompt,
     userPrompt,
-    modelPrompt: ""
+    modelPrompt: fillTemplate(modelPromptTemplate, buildTemplateValues({ room: args.room, providerPlayer: args.providerPlayer, functionType: "stateProcessor" }))
   };
 };
 

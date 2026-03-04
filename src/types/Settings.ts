@@ -17,6 +17,8 @@ export interface AIFunctionProvidersConfig {
 
 export interface AIPromptConfig {
   systemPrompt: string;
+  userPrompt?: string;
+  modelPrompt?: string;
   temperature: number;
 }
 
@@ -90,7 +92,9 @@ export const defaultSettings: GameSettings = {
       },
       prompt: {
         temperature: 0.3,
-        systemPrompt: ''
+        systemPrompt: '',
+        userPrompt: '',
+        modelPrompt: ''
       }
     },
     mainStory: {
@@ -102,7 +106,9 @@ export const defaultSettings: GameSettings = {
       },
       prompt: {
         temperature: 0.7,
-        systemPrompt: ''
+        systemPrompt: '',
+        userPrompt: '',
+        modelPrompt: ''
       }
     },
     stateProcessor: {
@@ -114,7 +120,9 @@ export const defaultSettings: GameSettings = {
       },
       prompt: {
         temperature: 0.1,
-        systemPrompt: ''
+        systemPrompt: '',
+        userPrompt: '',
+        modelPrompt: ''
       }
     }
   },

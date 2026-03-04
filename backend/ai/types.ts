@@ -12,6 +12,8 @@ export interface AIConnectionConfig {
 
 export interface AIPromptConfig {
   systemPrompt: string;
+  userPrompt?: string;
+  modelPrompt?: string;
   temperature: number;
 }
 
@@ -89,6 +91,24 @@ export interface RoomLike {
   memoryConfig?: Partial<RoomMemoryConfigLike>;
   memorySystem?: Partial<RoomMemorySystemLike>;
   memoryPendingTask?: RoomMemoryTaskLike | null;
+  aiThinkingHistory?: Array<{
+    round: number;
+    thinking: string;
+    time: string;
+    source?: "mainStory" | "reroll";
+  }>;
+  lastTurnSnapshot?: {
+    round: number;
+    groupedActions: ActionCollectorPayload;
+  } | null;
+  rerollVote?: {
+    id: string;
+    round: number;
+    prompt: string;
+    requesterId: string;
+    approvals: string[];
+    rejections: string[];
+  } | null;
 }
 
 export interface ActionCollectorRawAction {
@@ -126,7 +146,10 @@ export interface MainStoryHint {
 }
 
 export interface MainStoryPayload {
+  thinking?: string;
   globalSummary?: string;
+  shortTerm?: string;
+  publicLines?: Array<{ speaker: string; text: string }>;
   segments?: MainStorySegment[];
   nextHints?: MainStoryHint[];
 }

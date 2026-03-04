@@ -15,4 +15,5 @@ export interface 游戏日志 {
   内容: string;
   类型: 日志类型;
   时间戳: string;
+  回合?: number;
 }

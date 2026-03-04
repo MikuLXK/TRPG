@@ -54,6 +54,7 @@ interface DisplayEntry {
   speaker: string;
   text: string;
   time: string;
+  round?: number;
   kind: 'publicNarration' | 'narration' | 'dialogue' | 'judge' | 'hint' | 'section' | 'system';
   align: 'left' | 'right' | 'center';
 }
@@ -69,6 +70,12 @@ const resolveDisplayTime = (raw: string, currentGameTimeText: string) => {
   const source = String(raw || '').trim();
   if (source && isLikelyGameTime(source)) return source;
   return String(currentGameTimeText || '').trim() || source || '--:--';
+};
+
+const resolveRound = (value: unknown): number | undefined => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return undefined;
+  return Math.floor(num);
 };
 
 const tryParseStoryPayload = (raw: string): StoryPayload | null => {
@@ -114,6 +121,7 @@ const parseStoryTextLines = (
   const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
   const entries: DisplayEntry[] = [];
   let index = 0;
+  const baseRound = resolveRound(log.回合);
 
   for (const line of lines) {
     if (TITLE_LINE_PATTERN.test(line)) {
@@ -122,6 +130,7 @@ const parseStoryTextLines = (
         speaker: '分组',
         text: line,
         time: log.时间戳,
+        round: baseRound,
         kind: 'section',
         align: 'center'
       });
@@ -136,6 +145,7 @@ const parseStoryTextLines = (
       entries.push({
         id: `${log.id}-line-${index++}`,
         time: log.时间戳,
+        round: baseRound,
         ...classified
       });
       continue;
@@ -146,6 +156,7 @@ const parseStoryTextLines = (
       speaker: '旁白',
       text: line,
       time: log.时间戳,
+      round: baseRound,
       kind: 'narration',
       align: 'center'
     });
@@ -159,6 +170,8 @@ const parseStoryJson = (payload: StoryPayload, log: 游戏日志, selfSpeakerSet
   let index = 0;
   const publicLines = Array.isArray(payload.publicLines) ? payload.publicLines : [];
   const segments = Array.isArray(payload.segments) ? payload.segments : [];
+  const payloadRound = resolveRound(payload.round);
+  const baseRound = payloadRound ?? resolveRound(log.回合);
 
   for (const line of publicLines) {
     const speaker = String(line?.speaker || '').trim();
@@ -168,6 +181,7 @@ const parseStoryJson = (payload: StoryPayload, log: 游戏日志, selfSpeakerSet
     entries.push({
       id: `${log.id}-pub-${index++}`,
       time: log.时间戳,
+      round: baseRound,
       ...classified
     });
   }
@@ -180,6 +194,7 @@ const parseStoryJson = (payload: StoryPayload, log: 游戏日志, selfSpeakerSet
         speaker: '分组',
         text: title,
         time: log.时间戳,
+        round: baseRound,
         kind: 'section',
         align: 'center'
       });
@@ -193,6 +208,7 @@ const parseStoryJson = (payload: StoryPayload, log: 游戏日志, selfSpeakerSet
       entries.push({
         id: `${log.id}-segline-${index++}`,
         time: log.时间戳,
+        round: baseRound,
         ...classified
       });
     }
@@ -221,6 +237,7 @@ const parseLogToEntries = (log: 游戏日志, selfSpeakerSet: Set<string>): Disp
     speaker,
     text: content,
     time: log.时间戳,
+    round: resolveRound(log.回合),
     kind: log.类型 === '系统' ? 'system' : 'dialogue',
     align: isSelf ? 'right' : 'left'
   }];
@@ -272,11 +289,21 @@ export default function GameLogPanel({
       .filter((log) => log.发送者 === '系统' && String(log.内容 || '').trim())
       .filter((log) => log.类型 === '旁白' || log.类型 === '系统');
     if (systemLogs.length === 0) return [];
+
+    const safeCurrentRound = resolveRound(currentRound) || 1;
+    const byRound = systemLogs.filter((log) => resolveRound(log.回合) === safeCurrentRound);
+    if (byRound.length > 0) {
+      if (isOpeningScene) return byRound.slice(0, 3);
+      const preferredByRound = [...byRound].reverse().filter((log) => !String(log.内容 || '').startsWith('状态结算:'));
+      if (preferredByRound.length > 0) return preferredByRound.slice(0, 3);
+      return [...byRound].reverse().slice(0, 3);
+    }
+
     if (isOpeningScene) return systemLogs.slice(0, 3);
     const preferred = [...systemLogs].reverse().filter((log) => !String(log.内容 || '').startsWith('状态结算:'));
     if (preferred.length > 0) return preferred.slice(0, 3);
     return [...systemLogs].reverse().slice(0, 3);
-  }, [日志列表, isOpeningScene]);
+  }, [日志列表, isOpeningScene, currentRound]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -299,7 +326,6 @@ export default function GameLogPanel({
   };
 
   const waitingText = totalPlayers > 0 ? `已提交 ${readyCount}/${totalPlayers}，等待其他玩家...` : '行动已提交，等待其他玩家...';
-  const roundLabel = isOpeningScene ? `开场剧情 · 第 ${currentRound} 回合` : `第 ${currentRound} 回合`;
 
   return (
     <div className="h-full flex flex-col bg-zinc-950 relative overflow-hidden">
@@ -319,11 +345,6 @@ export default function GameLogPanel({
               <Brain size={13} />
             </button>
 
-            <div className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.15)]">
-              <Compass size={13} />
-              <span className="text-[11px] font-semibold tracking-wide">{roundLabel}</span>
-            </div>
-
             <button
               type="button"
               onClick={() => setShowRawModal(true)}
@@ -336,73 +357,86 @@ export default function GameLogPanel({
         </div>
 
         <AnimatePresence>
-          {displayEntries.map((entry) => (
-            <motion.div
-              key={entry.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`flex flex-col ${
-                entry.align === 'right'
-                  ? 'items-end'
-                  : entry.align === 'left'
-                    ? 'items-start'
-                    : 'items-center'
-              }`}
-            >
-              {entry.kind === 'publicNarration' && (
-                <div className="w-full max-w-[92%] px-5 py-3 rounded-2xl border border-emerald-500/35 bg-emerald-950/25 text-emerald-100 text-sm leading-relaxed text-center font-medium shadow-[0_0_20px_rgba(16,185,129,0.12)]">
-                  <div className="text-[10px] uppercase tracking-widest text-emerald-400/80 mb-1">公共旁白</div>
-                  <div className="whitespace-pre-wrap">{entry.text}</div>
-                </div>
-              )}
-
-              {entry.kind === 'narration' && (
-                <div className="w-full max-w-[92%] px-5 py-4 rounded-2xl border border-amber-500/45 bg-zinc-900/90 text-amber-100 text-sm leading-relaxed text-center font-serif tracking-wide shadow-[0_0_15px_rgba(245,158,11,0.1)]">
-                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">旁白</div>
-                  <div className="whitespace-pre-wrap">{entry.text}</div>
-                </div>
-              )}
-
-              {entry.kind === 'judge' && (
-                <div className="w-full max-w-[92%] px-4 py-3 rounded-xl border border-fuchsia-500/35 bg-fuchsia-950/20 text-fuchsia-100 text-xs leading-relaxed text-center">
-                  <div className="text-[10px] uppercase tracking-widest text-fuchsia-300/80 mb-1">判定</div>
-                  <div className="whitespace-pre-wrap">{entry.text}</div>
-                </div>
-              )}
-
-              {entry.kind === 'hint' && (
-                <div className="w-full max-w-[92%] px-4 py-3 rounded-xl border border-cyan-500/35 bg-cyan-950/20 text-cyan-100 text-xs leading-relaxed text-center">
-                  <div className="text-[10px] uppercase tracking-widest text-cyan-300/80 mb-1">行动提示</div>
-                  <div className="whitespace-pre-wrap">{entry.text}</div>
-                </div>
-              )}
-
-              {entry.kind === 'section' && (
-                <div className="w-full max-w-[92%] px-2 py-1 text-center text-[11px] tracking-wider text-zinc-500">
-                  {entry.text}
-                </div>
-              )}
-
-              {(entry.kind === 'dialogue' || entry.kind === 'system') && (
-                <div className={`w-full flex ${entry.align === 'right' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[78%] flex flex-col ${entry.align === 'right' ? 'items-end' : 'items-start'}`}>
-                    <div className={`mb-1 text-[11px] tracking-wide ${entry.align === 'right' ? 'text-cyan-300/80' : 'text-zinc-400'}`}>
-                      {entry.speaker}
-                      <span className="ml-2 text-[10px] text-zinc-500 font-mono">{entry.time}</span>
-                    </div>
-                    <div className={`
-                      px-4 py-3 rounded-2xl border text-sm leading-relaxed whitespace-pre-wrap
-                      ${entry.align === 'right'
-                        ? 'bg-cyan-950/35 border-cyan-700/35 text-cyan-100 rounded-tr-sm shadow-[0_0_12px_rgba(34,211,238,0.08)]'
-                        : 'bg-zinc-800/65 border-zinc-700/40 text-zinc-100 rounded-tl-sm'}
-                    `}>
-                      {entry.text}
+          {displayEntries.map((entry, index) => {
+            const prevRound = index > 0 ? displayEntries[index - 1]?.round : undefined;
+            const currentEntryRound = entry.round;
+            const showRoundBadge = Number.isFinite(currentEntryRound) && currentEntryRound !== prevRound;
+            return (
+              <motion.div
+                key={entry.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`flex flex-col ${
+                  entry.align === 'right'
+                    ? 'items-end'
+                    : entry.align === 'left'
+                      ? 'items-start'
+                      : 'items-center'
+                }`}
+              >
+                {showRoundBadge && (
+                  <div className="w-full flex justify-center mb-3">
+                    <div className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.15)]">
+                      <Compass size={13} />
+                      <span className="text-[11px] font-semibold tracking-wide">第 {currentEntryRound} 回合</span>
                     </div>
                   </div>
-                </div>
-              )}
-            </motion.div>
-          ))}
+                )}
+                {entry.kind === 'publicNarration' && (
+                  <div className="w-full max-w-[92%] px-5 py-3 rounded-2xl border border-emerald-500/35 bg-emerald-950/25 text-emerald-100 text-sm leading-relaxed text-center font-medium shadow-[0_0_20px_rgba(16,185,129,0.12)]">
+                    <div className="text-[10px] uppercase tracking-widest text-emerald-400/80 mb-1">公共旁白</div>
+                    <div className="whitespace-pre-wrap">{entry.text}</div>
+                  </div>
+                )}
+
+                {entry.kind === 'narration' && (
+                  <div className="w-full max-w-[92%] px-5 py-4 rounded-2xl border border-amber-500/45 bg-zinc-900/90 text-amber-100 text-sm leading-relaxed text-center font-serif tracking-wide shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+                    <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">旁白</div>
+                    <div className="whitespace-pre-wrap">{entry.text}</div>
+                  </div>
+                )}
+
+                {entry.kind === 'judge' && (
+                  <div className="w-full max-w-[92%] px-4 py-3 rounded-xl border border-fuchsia-500/35 bg-fuchsia-950/20 text-fuchsia-100 text-xs leading-relaxed text-center">
+                    <div className="text-[10px] uppercase tracking-widest text-fuchsia-300/80 mb-1">判定</div>
+                    <div className="whitespace-pre-wrap">{entry.text}</div>
+                  </div>
+                )}
+
+                {entry.kind === 'hint' && (
+                  <div className="w-full max-w-[92%] px-4 py-3 rounded-xl border border-cyan-500/35 bg-cyan-950/20 text-cyan-100 text-xs leading-relaxed text-center">
+                    <div className="text-[10px] uppercase tracking-widest text-cyan-300/80 mb-1">行动提示</div>
+                    <div className="whitespace-pre-wrap">{entry.text}</div>
+                  </div>
+                )}
+
+                {entry.kind === 'section' && (
+                  <div className="w-full max-w-[92%] px-2 py-1 text-center text-[11px] tracking-wider text-zinc-500">
+                    {entry.text}
+                  </div>
+                )}
+
+                {(entry.kind === 'dialogue' || entry.kind === 'system') && (
+                  <div className={`w-full flex ${entry.align === 'right' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[78%] flex flex-col ${entry.align === 'right' ? 'items-end' : 'items-start'}`}>
+                      <div className={`mb-1 text-[11px] tracking-wide ${entry.align === 'right' ? 'text-cyan-300/80' : 'text-zinc-400'}`}>
+                        {entry.speaker}
+                        <span className="ml-2 text-[10px] text-zinc-500 font-mono">{entry.time}</span>
+                      </div>
+                      <div className={`
+                        px-4 py-3 rounded-2xl border text-sm leading-relaxed whitespace-pre-wrap
+                        ${entry.align === 'right'
+                          ? 'bg-cyan-950/35 border-cyan-700/35 text-cyan-100 rounded-tr-sm shadow-[0_0_12px_rgba(34,211,238,0.08)]'
+                          : 'bg-zinc-800/65 border-zinc-700/40 text-zinc-100 rounded-tl-sm'}
+                      `}>
+                        {entry.text}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
 
         {isStreaming && (

@@ -1,4 +1,9 @@
-import type { ScriptDefinition, ScriptOpeningConfig } from "../../src/types/Script";
+import type {
+  ScriptDefinition,
+  ScriptOpeningConfig,
+  ScriptStoryLine,
+  ScriptStorySegment
+} from "../../src/types/Script";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -26,21 +31,23 @@ const pickPublicStatePatch = (value: unknown): Record<string, unknown> | null =>
   return Object.keys(next).length > 0 ? next : null;
 };
 
-const sanitizeStoryLine = (value: unknown) => {
+const sanitizeStoryLine = (value: unknown): ScriptStoryLine | null => {
   const speaker = String((value as any)?.speaker || "").trim();
   const text = String((value as any)?.text || "").trim();
   if (!speaker || !text) return null;
   return { speaker, text };
 };
 
-const sanitizeStorySegment = (value: unknown) => {
+const sanitizeStorySegment = (value: unknown): ScriptStorySegment | null => {
   const groupId = String((value as any)?.groupId || "").trim();
   const title = String((value as any)?.title || "").trim();
   const visibleToPlayerIds = Array.isArray((value as any)?.visibleToPlayerIds)
     ? (value as any).visibleToPlayerIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
     : undefined;
-  const lines = Array.isArray((value as any)?.lines)
-    ? (value as any).lines.map(sanitizeStoryLine).filter((line): line is { speaker: string; text: string } => Boolean(line))
+  const lines: ScriptStoryLine[] = Array.isArray((value as any)?.lines)
+    ? (value as any).lines
+        .map((line: unknown) => sanitizeStoryLine(line))
+        .filter((line): line is ScriptStoryLine => Boolean(line))
     : [];
   if (!groupId || !title || lines.length === 0) return null;
   return { groupId, title, lines, visibleToPlayerIds };
@@ -109,11 +116,15 @@ const resolveScriptOpening = (script: ScriptDefinition): ScriptOpeningConfig | n
     ? source.openingStory
     : fallback.openingStory;
   const round = Number(rawStory.round);
-  const publicLines = Array.isArray(rawStory.publicLines)
-    ? rawStory.publicLines.map(sanitizeStoryLine).filter((line): line is { speaker: string; text: string } => Boolean(line))
+  const publicLines: ScriptStoryLine[] = Array.isArray(rawStory.publicLines)
+    ? (rawStory.publicLines as unknown[])
+      .map((line: unknown) => sanitizeStoryLine(line))
+      .filter((line): line is ScriptStoryLine => Boolean(line))
     : [];
-  const segments = Array.isArray(rawStory.segments)
-    ? rawStory.segments.map(sanitizeStorySegment).filter((segment): segment is { groupId: string; title: string; lines: { speaker: string; text: string }[]; visibleToPlayerIds?: string[] } => Boolean(segment))
+  const segments: ScriptStorySegment[] = Array.isArray(rawStory.segments)
+    ? (rawStory.segments as unknown[])
+      .map((segment: unknown) => sanitizeStorySegment(segment))
+      .filter((segment): segment is ScriptStorySegment => Boolean(segment))
     : [];
 
   return {
@@ -262,9 +273,19 @@ export const registerCharacterSetupEvents = (socket: any, deps: {
     if (!room) return;
     if (room.hostId !== socket.id) return socket.emit("error", "只有房主可以开始游戏");
     if (room.hasStarted || room.status !== "waiting") return socket.emit("error", "游戏已经开始");
+    const activePlayers = deps.getActivePlayers(room);
+    if (!deps.validateStartCondition(room) && activePlayers.length === 1) {
+      const solo = activePlayers[0];
+      if (solo) {
+        solo.apiFunctions = {
+          actionCollector: true,
+          mainStory: true,
+          stateProcessor: true
+        };
+      }
+    }
     if (!deps.validateStartCondition(room)) return socket.emit("error", "三个AI功能都至少需要一名玩家提供API");
     if (room.gameSetupMode === "load_save") {
-      const activePlayers = deps.getActivePlayers(room);
       const hasUnassigned = activePlayers.some((player: any) => !player.selectedSavedCharacterId && !player.canCreateCustomCharacter);
       if (hasUnassigned) return socket.emit("error", "加载存档模式下，仍有玩家未选择角色或未进入创建角色");
     }
@@ -299,7 +320,8 @@ export const registerCharacterSetupEvents = (socket: any, deps: {
         发送者: "系统",
         内容: JSON.stringify(opening.openingStory),
         类型: "旁白",
-        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        回合: Number(room.currentRound) || 1
       };
       room.logs.push(openingLog);
     }

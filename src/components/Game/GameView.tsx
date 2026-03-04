@@ -175,13 +175,16 @@ const normalizeGameLog = (value: any): 游戏日志 | null => {
   const id = idRaw || `${sender}-${time}-${content.slice(0, 18)}`;
   const 类型 = type || '系统';
   const 时间戳 = time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const roundRaw = Number(value?.['回合'] ?? value?.round);
+  const 回合 = Number.isFinite(roundRaw) && roundRaw > 0 ? Math.floor(roundRaw) : undefined;
 
   return {
     id,
     发送者: sender,
     内容: content,
     类型: 类型 as 游戏日志['类型'],
-    时间戳
+    时间戳,
+    ...(回合 ? { 回合 } : {})
   };
 };
 
@@ -604,12 +607,16 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     };
 
     const onPlayerStory = ({ story, round }: { story: string; round: number }) => {
+      const roundValue = Number.isFinite(Number(round)) && Number(round) > 0
+        ? Math.floor(Number(round))
+        : (Number(currentRound) || 1);
       const newLog: 游戏日志 = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         发送者: '系统',
         内容: story,
         类型: '旁白',
-        时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        回合: roundValue
       };
 
       set游戏数据((prev) => ({
@@ -652,7 +659,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       socket.off('story_stream_end', onStoryStreamEnd);
       socket.off('player_story', onPlayerStory);
     };
-  }, [accountUsername]);
+  }, [accountUsername, currentRound]);
 
   const aiStepText = useMemo(() => {
     const streamText = streamingMode === 'provider' ? '流式：跟随API提供者' : '流式：关闭';

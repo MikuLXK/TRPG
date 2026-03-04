@@ -147,7 +147,8 @@ export const registerTurnEvents = (socket: any, deps: {
         发送者: "系统",
         内容: `重Roll完成：${String(storyPayload?.shortTerm || storyPayload?.globalSummary || "").trim() || "已重新生成剧情"}`,
         类型: "系统",
-        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        回合: Number(snapshot.round) || Number(room.currentRound) || 1
       });
 
       room.rerollVote = null;
@@ -210,7 +211,8 @@ export const registerTurnEvents = (socket: any, deps: {
         发送者: "系统",
         内容: `公共状态已更新（${summary}）：${Object.keys(publicPatch).join("、")}`,
         类型: "系统",
-        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        回合: Number(room.currentRound) || 1
       };
       room.logs.push(newLog);
       deps.io.to(roomId).emit("new_log", newLog);

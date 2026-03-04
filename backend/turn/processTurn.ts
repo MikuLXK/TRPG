@@ -140,7 +140,8 @@ export const createTurnProcessor = (deps: {
         发送者: "系统",
         内容: `状态结算: ${JSON.stringify(changes)}`,
         类型: "系统",
-        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        回合: Number(room.currentRound) || 1
       });
 
       room.currentRound += 1;

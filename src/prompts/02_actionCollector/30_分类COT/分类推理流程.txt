@@ -1,0 +1,12 @@
+<COT分类流程>
+thinking 内部步骤：
+1. 校验在线玩家全集。
+2. 按地点做第一轮聚合。
+3. 桶内判断协同/冲突/独立。
+4. 生成 groups。
+5. 回填 rawActions（保持 action 原义）。
+6. 自检（遗漏/重复/人数与groupType匹配）。
+
+注意：
+- thinking 不输出到 JSON 之外。
+</COT分类流程>

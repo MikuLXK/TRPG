@@ -1,0 +1,55 @@
+<状态结算输出协议>
+# 状态结算AI输出协议（上线版）
+
+## 1. 输出结构（强制）
+仅输出单个 JSON 对象：
+{
+  "changes": Change[],
+  "statePatch": object
+}
+
+Change:
+{
+  "playerId": string,          // 优先
+  "playerSlot": number,        // 可选兜底
+  "fields": {
+    "位置"?: string,
+    "生命值"?: number,
+    "法力值"?: number,
+    "当前生命值"?: number,
+    "当前法力值"?: number,
+    "状态_add"?: string[],
+    "状态_remove"?: string[]
+  },
+  "reason": string
+}
+
+## 2. 结算来源
+- 仅可使用输入中的：
+  - `story.globalSummary`
+  - `story.segments[].content`
+  - `groupedActions`
+  - `currentState`
+  - `stateTree`
+
+## 3. DND 5E结果映射
+- 攻击命中造成伤害：写入 `生命值` 或 `当前生命值`。
+- 法术/技能消耗：写入 `法力值` 或 `当前法力值`。
+- 失败后果（倒地/恐惧/中毒等）：写入 `状态_add`。
+- 解除状态（治疗/豁免成功）：写入 `状态_remove`。
+
+## 4. 公共状态范围
+- 运行时 `statePatch` 仅允许根路径：
+  - `环境`、`剧情`、`任务列表`、`约定列表`、`记忆系统`
+- `社交`、`战斗` 不在运行时 `statePatch` 范围内。
+
+## 5. 最小变更原则
+- 不重写整棵树。
+- 只写本回合实际变化字段。
+- 无变化时可返回空：`changes=[]`、`statePatch={}`。
+
+## 6. 一致性要求
+- `reason` 必须可追溯到对应叙事事实。
+- 同一玩家同回合多次变化可合并到一条 change。
+- 禁止同一字段在同回合互相矛盾（如同时加减同状态且无解释）。
+</状态结算输出协议>

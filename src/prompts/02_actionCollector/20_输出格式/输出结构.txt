@@ -1,0 +1,31 @@
+<输出结构定义>
+输出必须是单个 JSON 对象：
+
+{
+  "groups": [
+    {
+      "groupType": "together" | "solo",
+      "playerIds": ["玩家ID1", "玩家ID2"],
+      "location": "地点",
+      "reason": "分组原因"
+    }
+  ],
+  "rawActions": [
+    {
+      "playerId": "玩家ID",
+      "playerName": "玩家名",
+      "playerSlot": 1,
+      "location": "地点",
+      "action": "原始输入"
+    }
+  ]
+}
+
+硬约束：
+- 仅输出 JSON；禁止 markdown 包裹。
+- `groups` 与 `rawActions` 必须同时存在。
+- `groupType=together` 时 `playerIds.length >= 2`。
+- `groupType=solo` 时 `playerIds.length = 1`。
+- 不得遗漏、不得重复玩家。
+- `location` 为空时写“未知地点”。
+</输出结构定义>

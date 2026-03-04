@@ -1,0 +1,8 @@
+请根据以下输入执行“玩家行动分组”，并仅输出 JSON。
+
+输出要求：
+- 必须包含 `groups` 与 `rawActions`。
+- 不得输出解释文字。
+
+输入数据：
+{{actionCollectorInputJson}}

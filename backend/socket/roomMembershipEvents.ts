@@ -1,3 +1,5 @@
+import { buildMemoryTask, createDefaultRoomMemoryConfig, createEmptyRoomMemorySystem } from "../turn/memory";
+
 export const registerRoomMembershipEvents = (socket: any, deps: {
   rooms: Record<string, any>;
   io: any;
@@ -25,6 +27,14 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       room.accountSlotMap = {};
     }
     return room.accountSlotMap as Record<string, number>;
+  };
+
+  const ensureRoomMemory = (room: any) => {
+    if (!room.memoryConfig) room.memoryConfig = createDefaultRoomMemoryConfig();
+    if (!room.memorySystem) room.memorySystem = createEmptyRoomMemorySystem();
+    if (typeof room.memoryPendingTask === "undefined") {
+      room.memoryPendingTask = buildMemoryTask(room.memorySystem, room.memoryConfig);
+    }
   };
 
   const collectUsedSlots = (room: any) => {
@@ -81,6 +91,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
     const playerName = typeof data?.playerName === "string" ? data.playerName.trim() : "";
 
     const roomList = Object.values(deps.rooms).map((r: any) => {
+      ensureRoomMemory(r);
       const activePlayers = deps.getActivePlayers(r);
       const reconnectCandidate = accountUsername
         ? r.players.find((p: any) => p.accountUsername === accountUsername)
@@ -150,6 +161,9 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
       emptySince: null,
       script,
       accountSlotMap: data.accountUsername ? { [normalizeAccountKey(data.accountUsername)]: hostSlot } : {},
+      memoryConfig: createDefaultRoomMemoryConfig(),
+      memorySystem: createEmptyRoomMemorySystem(),
+      memoryPendingTask: buildMemoryTask(createEmptyRoomMemorySystem(), createDefaultRoomMemoryConfig()),
       sharedAssets: {
         script: {
           assetType: "script",
@@ -175,6 +189,7 @@ export const registerRoomMembershipEvents = (socket: any, deps: {
   socket.on("join_room", ({ roomId, playerName, accountUsername, password }: { roomId: string; playerName: string; accountUsername?: string; password?: string }) => {
     const room = deps.rooms[roomId];
     if (!room) return socket.emit("error", "房间不存在");
+    ensureRoomMemory(room);
 
     const activePlayers = deps.getActivePlayers(room);
     const identityKey = typeof accountUsername === "string" && accountUsername.trim()

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scroll, Users, Settings, Backpack, ClipboardList, UserRound } from 'lucide-react';
+import { Scroll, Users, Settings, Backpack, ClipboardList, UserRound, Brain } from 'lucide-react';
 
 interface MenuOption {
   id: string;
@@ -14,15 +14,17 @@ const menuOptions: MenuOption[] = [
   { id: '3', label: '任务记录', icon: <ClipboardList size={20} />, description: '查看当前任务与进度' },
   { id: '4', label: '人物志', icon: <UserRound size={20} />, description: '查看已结识的人物信息' },
   { id: '5', label: '队伍', icon: <Users size={20} />, description: '管理队伍成员与阵型' },
-  { id: '6', label: '系统设置', icon: <Settings size={20} />, description: '调整游戏显示与音效' },
+  { id: '6', label: '记忆回顾', icon: <Brain size={20} />, description: '查看即时/短期/中期/长期记忆' },
+  { id: '7', label: '系统设置', icon: <Settings size={20} />, description: '调整游戏显示与音效' },
 ];
 
 interface ActionMenuPanelProps {
   onOpenSettings: () => void;
   onOpenTeam: () => void;
+  onOpenMemory: () => void;
 }
 
-export default function ActionMenuPanel({ onOpenSettings, onOpenTeam }: ActionMenuPanelProps) {
+export default function ActionMenuPanel({ onOpenSettings, onOpenTeam, onOpenMemory }: ActionMenuPanelProps) {
   return (
     <div className="h-full bg-transparent border-l border-zinc-800 p-4 flex flex-col overflow-y-auto no-scrollbar relative">
        {/* Decorative Corner */}
@@ -40,8 +42,9 @@ export default function ActionMenuPanel({ onOpenSettings, onOpenTeam }: ActionMe
           <button
             key={option.id}
             onClick={() => {
-              if (option.id === '6') onOpenSettings();
+              if (option.id === '7') onOpenSettings();
               if (option.id === '5') onOpenTeam();
+              if (option.id === '6') onOpenMemory();
             }}
             className="group relative w-full p-4 bg-zinc-950 border border-zinc-800 rounded-xl text-left transition-all duration-300 hover:border-amber-500/50 hover:bg-zinc-900 hover:shadow-[0_0_20px_rgba(245,158,11,0.1)] overflow-hidden"
           >

@@ -31,6 +31,38 @@ export interface ScriptLike {
   settingPrompt?: string;
 }
 
+export interface RoomMemoryConfigLike {
+  immediateLimit: number;
+  shortThreshold: number;
+  midThreshold: number;
+  shortToMidPrompt: string;
+  midToLongPrompt: string;
+}
+
+export interface RoomMemorySystemLike {
+  回忆档案: Array<{
+    名称: string;
+    概括: string;
+    原文: string;
+    回合: number;
+    记录时间: string;
+  }>;
+  即时记忆: string[];
+  短期记忆: string[];
+  中期记忆: string[];
+  长期记忆: string[];
+}
+
+export interface RoomMemoryTaskLike {
+  id: string;
+  来源层: "短期" | "中期";
+  目标层: "中期" | "长期";
+  批次: string[];
+  批次条数: number;
+  起始时间: string;
+  结束时间: string;
+}
+
 export interface PlayerLike {
   id: string;
   name: string;
@@ -54,6 +86,9 @@ export interface RoomLike {
   players: PlayerLike[];
   functionRotationIndex: Record<AIFunctionType, number>;
   script?: ScriptLike;
+  memoryConfig?: Partial<RoomMemoryConfigLike>;
+  memorySystem?: Partial<RoomMemorySystemLike>;
+  memoryPendingTask?: RoomMemoryTaskLike | null;
 }
 
 export interface ActionCollectorRawAction {

@@ -73,6 +73,38 @@ class SocketService {
     this.socket?.emit("set_room_streaming_mode", { roomId, mode });
   }
 
+  updateRoomMemoryConfig(roomId: string, config: GameSettings["memory"]) {
+    this.socket?.emit("update_room_memory_config", { roomId, config });
+  }
+
+  generateMemorySummary(args: { roomId: string; taskId?: string; temperature?: number }) {
+    return new Promise<{ ok: boolean; summary?: string; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("memory_summary_generate", args, (payload: { ok: boolean; summary?: string; error?: string }) => {
+        resolve(payload || { ok: false, error: "总结服务无响应" });
+      });
+    });
+  }
+
+  applyMemorySummary(args: { roomId: string; taskId: string; summary: string }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: 'Socket 未连接' });
+        return;
+      }
+      this.socket.emit("memory_summary_apply", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "写入服务无响应" });
+      });
+    });
+  }
+
+  dismissMemorySummary(roomId: string, taskId?: string) {
+    this.socket?.emit("memory_summary_dismiss", { roomId, taskId });
+  }
+
   togglePlayerAIFunction(roomId: string, functionType: AIFunctionType) {
     this.socket?.emit("toggle_player_ai_function", { roomId, functionType });
   }

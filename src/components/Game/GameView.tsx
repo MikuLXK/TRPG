@@ -4,10 +4,14 @@ import Footer from '../Layout/Footer';
 import CharacterPanel from '../Panels/CharacterPanel';
 import GameLogPanel from '../Panels/GameLogPanel';
 import RightPanel from '../Panels/RightPanel';
+import MemorySummaryFlowModal from '../Panels/MemorySummaryFlowModal';
 import SettingsModal from '../Settings/SettingsModal';
-import { 初始游戏状态, 游戏状态, 游戏日志, 角色信息, 游戏世界观, 玩家角色 } from '../../types/gameData';
+import { 初始游戏状态, 游戏状态, 游戏日志, 角色信息, 游戏世界观, 玩家角色, 记忆压缩任务, 记忆系统结构 } from '../../types/gameData';
 import type { ScriptRoleTemplate, CharacterAttributeBlock, PlayerCharacterProfile } from '../../types/Script';
 import { socketService } from '../../services/socketService';
+import { dbService } from '../../services/dbService';
+import { defaultSettings } from '../../types/Settings';
+import { 创建空记忆系统, 清理记忆总结输出, 规范化记忆任务, 规范化记忆系统 } from '../../utils/memory';
 
 interface GameViewProps {
   roomState: any;
@@ -348,7 +352,8 @@ const syncGameDataFromRoom = (
         ...prev.剧情.主线目标,
         最终目标: prev.剧情.主线目标.最终目标 || room?.script?.finalGoal || ''
       }
-    }
+    },
+    记忆系统: 规范化记忆系统(room?.memorySystem)
   };
 
   const next玩家 = toCharacterInfo(selfRole, room?.script?.description || '');
@@ -363,6 +368,7 @@ const syncGameDataFromRoom = (
 export default function GameView({ roomState, onExit, roomId, accountUsername = '' }: GameViewProps) {
   const [游戏数据, set游戏数据] = useState<游戏状态>(初始游戏状态);
   const openingAppliedKeyRef = useRef('');
+  const memoryTaskIdRef = useRef('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [readyCount, setReadyCount] = useState(0);
@@ -373,11 +379,66 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
   const [currentRound, setCurrentRound] = useState<number>(roomState?.currentRound || 1);
   const [streamingMode, setStreamingMode] = useState<'off' | 'provider'>(roomState?.streamingMode === 'off' ? 'off' : 'provider');
   const [playerInputStates, setPlayerInputStates] = useState<玩家输入状态[]>([]);
+  const [待处理记忆总结任务, set待处理记忆总结任务] = useState<记忆压缩任务 | null>(null);
+  const [记忆总结阶段, set记忆总结阶段] = useState<'idle' | 'remind' | 'processing' | 'review'>('idle');
+  const [记忆总结草稿, set记忆总结草稿] = useState('');
+  const [记忆总结错误, set记忆总结错误] = useState('');
 
   const roleTemplates: ScriptRoleTemplate[] = roomState?.script?.roleTemplates || [];
 
   useEffect(() => {
+    const loadMemoryConfig = async () => {
+      try {
+        const savedSettings = accountUsername
+          ? await dbService.getUserSetting(accountUsername, 'gameSettings')
+          : await dbService.getSetting('gameSettings');
+        const nextMemory = {
+          ...defaultSettings.memory,
+          ...(savedSettings?.memory || {})
+        };
+        if (roomId) {
+          socketService.updateRoomMemoryConfig(roomId, nextMemory);
+        }
+      } catch {
+        if (roomId) {
+          socketService.updateRoomMemoryConfig(roomId, defaultSettings.memory);
+        }
+      }
+    };
+    void loadMemoryConfig();
+  }, [accountUsername, roomId]);
+
+  const 同步记忆任务状态 = (room: any) => {
+    const nextTask = 规范化记忆任务(room?.memoryPendingTask);
+    const prevId = memoryTaskIdRef.current;
+    const nextId = nextTask?.id || '';
+    if (!nextTask) {
+      memoryTaskIdRef.current = '';
+      set待处理记忆总结任务(null);
+      set记忆总结阶段('idle');
+      set记忆总结草稿('');
+      set记忆总结错误('');
+      return;
+    }
+    if (prevId !== nextId) {
+      memoryTaskIdRef.current = nextId;
+      set待处理记忆总结任务(nextTask);
+      set记忆总结阶段('remind');
+      set记忆总结草稿('');
+      set记忆总结错误('');
+      return;
+    }
+    memoryTaskIdRef.current = nextId;
+    set待处理记忆总结任务(nextTask);
+  };
+
+  useEffect(() => {
     openingAppliedKeyRef.current = '';
+    memoryTaskIdRef.current = '';
+    set待处理记忆总结任务(null);
+    set记忆总结阶段('idle');
+    set记忆总结草稿('');
+    set记忆总结错误('');
   }, [roomState?.id, roomState?.script?.id]);
 
   useEffect(() => {
@@ -390,6 +451,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     setCurrentRound(roomState?.currentRound || 1);
     setStreamingMode(roomState?.streamingMode === 'off' ? 'off' : 'provider');
     setPlayerInputStates(buildPlayerInputStates(players));
+    同步记忆任务状态(roomState);
     set游戏数据((prev) => {
       let next = syncGameDataFromRoom(prev, roomState, roleTemplates, accountUsername);
       next = syncLogsFromRoom(next, roomState);
@@ -429,6 +491,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
         setCurrentRound(room.currentRound || 1);
         setStreamingMode(room.streamingMode === 'off' ? 'off' : 'provider');
         setPlayerInputStates(buildPlayerInputStates(room.players || []));
+        同步记忆任务状态(room);
         const nextTemplates: ScriptRoleTemplate[] = room?.script?.roleTemplates || [];
         set游戏数据((prev) => {
           let synced = syncGameDataFromRoom(prev, room, nextTemplates, accountUsername);
@@ -460,6 +523,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       setCurrentRound(updatedRoom?.currentRound || 1);
       setStreamingMode(updatedRoom?.streamingMode === 'off' ? 'off' : 'provider');
       setPlayerInputStates(buildPlayerInputStates(nextPlayers));
+      同步记忆任务状态(updatedRoom);
       const nextTemplates: ScriptRoleTemplate[] = updatedRoom?.script?.roleTemplates || [];
       set游戏数据((prev) => {
         let next = syncGameDataFromRoom(prev, updatedRoom, nextTemplates, accountUsername);
@@ -634,8 +698,69 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     }
   };
 
+  const 打开记忆总结 = () => {
+    if (!待处理记忆总结任务) return;
+    set记忆总结阶段((prev) => (prev === 'processing' || prev === 'review' ? prev : 'remind'));
+  };
+
+  const 开始记忆总结 = async () => {
+    if (!待处理记忆总结任务 || !roomState?.id) return;
+    set记忆总结阶段('processing');
+    set记忆总结错误('');
+    try {
+      const result = await socketService.generateMemorySummary({
+        roomId: roomState.id,
+        taskId: 待处理记忆总结任务.id,
+        temperature: 0.2
+      });
+      if (!result.ok) {
+        set记忆总结错误(result.error || '记忆总结失败');
+        set记忆总结阶段('review');
+        return;
+      }
+      const cleaned = 清理记忆总结输出(result.summary || '');
+      set记忆总结草稿(cleaned);
+      set记忆总结阶段('review');
+    } catch (error) {
+      set记忆总结错误(String((error as Error)?.message || error || '记忆总结失败'));
+      set记忆总结阶段('review');
+    }
+  };
+
+  const 应用记忆总结 = async () => {
+    if (!待处理记忆总结任务 || !roomState?.id) return;
+    if (!记忆总结草稿.trim()) {
+      set记忆总结错误('总结内容为空，请先生成或补充后再写入。');
+      set记忆总结阶段('review');
+      return;
+    }
+    const result = await socketService.applyMemorySummary({
+      roomId: roomState.id,
+      taskId: 待处理记忆总结任务.id,
+      summary: 记忆总结草稿
+    });
+    if (!result.ok) {
+      set记忆总结错误(result.error || '记忆写入失败');
+      set记忆总结阶段('review');
+      return;
+    }
+    set记忆总结阶段('idle');
+    set记忆总结草稿('');
+    set记忆总结错误('');
+  };
+
+  const 暂不处理记忆总结 = () => {
+    set记忆总结阶段('idle');
+    set记忆总结草稿('');
+    set记忆总结错误('');
+  };
+
   const actionLogs = 游戏数据.日志列表.filter((log) => log.类型 !== 'OOC');
   const chatLogs = 游戏数据.日志列表.filter((log) => log.类型 === 'OOC');
+  const memorySystem: 记忆系统结构 = useMemo(
+    () => 规范化记忆系统(游戏数据.记忆系统 || 创建空记忆系统()),
+    [游戏数据.记忆系统]
+  );
   const selfSpeakerNames = useMemo(
     () => collectSelfSpeakerNames({ roomPlayers: roomState?.players || [], gameData: 游戏数据, accountUsername }),
     [roomState?.players, 游戏数据, accountUsername]
@@ -678,6 +803,10 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
               onSendChat={handleSendChat}
               onOpenSettings={() => setIsSettingsOpen(true)}
               players={roomState?.players || []}
+              memorySystem={memorySystem}
+              memoryPendingTask={待处理记忆总结任务}
+              memorySummaryStage={记忆总结阶段}
+              onOpenMemorySummary={打开记忆总结}
             />
           </div>
         </div>
@@ -691,6 +820,19 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
         onExitToHome={onExit}
         roomId={roomId}
         accountUsername={accountUsername}
+      />
+
+      <MemorySummaryFlowModal
+        open={Boolean(待处理记忆总结任务) && 记忆总结阶段 !== 'idle'}
+        stage={记忆总结阶段}
+        task={待处理记忆总结任务}
+        draft={记忆总结草稿}
+        error={记忆总结错误}
+        onStart={() => void 开始记忆总结()}
+        onCancel={暂不处理记忆总结}
+        onBack={() => set记忆总结阶段('remind')}
+        onDraftChange={set记忆总结草稿}
+        onApply={() => void 应用记忆总结()}
       />
     </div>
   );

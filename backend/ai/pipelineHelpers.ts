@@ -170,6 +170,13 @@ export const buildMainStoryInput = (room: RoomLike, groupedActions: ActionCollec
       time: String(log?.["时间戳"] || "")
     }))
     .filter((item) => item.content);
+  const memory = room.memorySystem || {};
+  const memoryContext = {
+    长期记忆: Array.isArray((memory as any).长期记忆) ? (memory as any).长期记忆.slice(-8) : [],
+    中期记忆: Array.isArray((memory as any).中期记忆) ? (memory as any).中期记忆.slice(-10) : [],
+    短期记忆: Array.isArray((memory as any).短期记忆) ? (memory as any).短期记忆.slice(-12) : [],
+    即时记忆: Array.isArray((memory as any).即时记忆) ? (memory as any).即时记忆.slice(-8) : []
+  };
   return {
     phase: "main_story",
     round: room.currentRound,
@@ -183,7 +190,8 @@ export const buildMainStoryInput = (room: RoomLike, groupedActions: ActionCollec
     },
     groupedActions,
     players,
-    recentLogs
+    recentLogs,
+    memoryContext
   };
 };
 

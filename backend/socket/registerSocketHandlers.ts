@@ -24,6 +24,16 @@ export const registerSocketHandlers = (deps: {
   claimSavedCharacterForPlayer: (room: any, player: any, characterId: string) => void;
   setPlayerCustomCharacterMode: (room: any, player: any, enabled: boolean) => void;
   validateStartCondition: (room: any) => boolean;
+  runMemorySummary: (args: {
+    room: any;
+    requesterId: string;
+    systemPrompt: string;
+    userPrompt: string;
+    temperature?: number;
+  }) => Promise<string>;
+  normalizeRoomMemoryConfig: (raw?: any) => any;
+  normalizeRoomMemorySystem: (raw?: any) => any;
+  buildMemoryTask: (memoryBase: any, configBase: any) => any;
 }) => {
   deps.io.on("connection", (socket: any) => {
     console.log(`Client connected: ${socket.id}`);
@@ -69,7 +79,11 @@ export const registerSocketHandlers = (deps: {
       io: deps.io,
       getActivePlayers: deps.getActivePlayers,
       processTurn: deps.processTurn,
-      removePlayerFromRoom: deps.removePlayerFromRoom
+      removePlayerFromRoom: deps.removePlayerFromRoom,
+      runMemorySummary: deps.runMemorySummary,
+      normalizeRoomMemoryConfig: deps.normalizeRoomMemoryConfig,
+      normalizeRoomMemorySystem: deps.normalizeRoomMemorySystem,
+      buildMemoryTask: deps.buildMemoryTask
     });
   });
 };

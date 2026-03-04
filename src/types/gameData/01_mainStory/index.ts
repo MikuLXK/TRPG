@@ -6,4 +6,5 @@ export * from './20_游戏设定/combat/types';
 export * from './20_游戏设定/story/types';
 export * from './20_游戏设定/task/types';
 export * from './20_游戏设定/agreement/types';
+export * from './20_游戏设定/memory/types';
 export * from './20_游戏设定/state/types';

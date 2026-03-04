@@ -5,6 +5,7 @@ import type { 战斗结构 } from '../combat/types';
 import type { 剧情结构 } from '../story/types';
 import type { 任务条目 } from '../task/types';
 import type { 约定条目 } from '../agreement/types';
+import type { 记忆系统结构 } from '../memory/types';
 import type { 游戏日志, 角色属性 } from '../shared/common';
 
 export interface TRPGSaveData {
@@ -17,6 +18,7 @@ export interface TRPGSaveData {
   社交: 社交结构;
   战斗: 战斗结构;
   剧情: 剧情结构;
+  记忆系统: 记忆系统结构;
   任务列表: 任务条目[];
   约定列表: 约定条目[];
   日志列表: 游戏日志[];
@@ -149,6 +151,13 @@ export const 初始游戏状态: 游戏状态 = {
     待触发事件: [],
     已发生事件: [],
     历史卷宗: []
+  },
+  记忆系统: {
+    回忆档案: [],
+    即时记忆: [],
+    短期记忆: [],
+    中期记忆: [],
+    长期记忆: []
   },
   任务列表: [],
   约定列表: [],

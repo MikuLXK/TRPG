@@ -24,6 +24,7 @@ TRPGSaveData
 ├─ 社交
 ├─ 战斗
 ├─ 剧情
+├─ 记忆系统
 ├─ 任务列表
 └─ 约定列表
 
@@ -216,7 +217,15 @@ TRPGSaveData
 ├─ 已发生事件: Array<{ 事件ID:string, 名称:string, 内容:string, 影响:string, 时间:string }>
 └─ 历史卷宗: Array<{ 标题:string, 结语:string, 记录时间:string }>
 
-## 7. 任务列表
+## 7. 记忆系统（记忆系统）
+记忆系统
+├─ 回忆档案: Array<{ 名称:string, 概括:string, 原文:string, 回合:number, 记录时间:string }>
+├─ 即时记忆: string[]
+├─ 短期记忆: string[]
+├─ 中期记忆: string[]
+└─ 长期记忆: string[]
+
+## 8. 任务列表
 任务列表[i]
 ├─ 任务ID: string
 ├─ 标题: string
@@ -232,7 +241,7 @@ TRPGSaveData
 ├─ 关联章节ID: string | null
 └─ 备注: string
 
-## 8. 约定列表
+## 9. 约定列表
 约定列表[i]
 ├─ 约定ID: string
 ├─ 对象ID: string
@@ -248,7 +257,7 @@ TRPGSaveData
 ├─ 违约后果: string
 └─ 背景备注: string
 
-## 9. 协议边界
+## 10. 协议边界
 - 本协议仅定义字段树、字段命名、字段类型。
 - 命令顺序、写入门禁、同步流程由独立协议处理。
 - 只允许最小改动写入，不允许无关字段批量覆盖。

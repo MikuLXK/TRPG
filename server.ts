@@ -23,12 +23,20 @@ import {
   PROVIDER_DEFAULT_ENDPOINTS,
   readPromptFile,
   runActionCollector,
+  runMemorySummary,
   runMainStory,
   runStateProcessor,
   validateStartCondition
 } from "./backend/ai/service";
 import { applyStateChanges as applyStateChangesBase } from "./backend/turn/stateSettlement";
 import { createTurnProcessor } from "./backend/turn/processTurn";
+import {
+  buildMemoryTask,
+  createDefaultRoomMemoryConfig,
+  createEmptyRoomMemorySystem,
+  normalizeRoomMemoryConfig,
+  normalizeRoomMemorySystem
+} from "./backend/turn/memory";
 import { registerAdminUserRoutes } from "./backend/routes/adminUserRoutes";
 import { registerAdminContentRoutes } from "./backend/routes/adminContentRoutes";
 import { registerPlayerAssetRoutes } from "./backend/routes/playerAssetRoutes";
@@ -146,6 +154,9 @@ interface Room {
   emptySince: number | null;
   script: ScriptDefinition;
   accountSlotMap: Record<string, number>;
+  memoryConfig: ReturnType<typeof createDefaultRoomMemoryConfig>;
+  memorySystem: ReturnType<typeof createEmptyRoomMemorySystem>;
+  memoryPendingTask: ReturnType<typeof buildMemoryTask> | null;
   sharedAssets: {
     script?: SharedAssetEnvelope<ScriptDefinition>;
     save?: SharedAssetEnvelope<any>;
@@ -1087,7 +1098,11 @@ registerSocketHandlers({
   switchGameSetupMode,
   claimSavedCharacterForPlayer,
   setPlayerCustomCharacterMode,
-  validateStartCondition
+  validateStartCondition,
+  runMemorySummary,
+  normalizeRoomMemoryConfig,
+  normalizeRoomMemorySystem,
+  buildMemoryTask
 });
 
 registerCoreRoutes({

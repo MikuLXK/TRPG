@@ -149,3 +149,30 @@ export const runStateProcessor = async (room: RoomLike, storyPayload: MainStoryP
   });
   return normalizeStateProcessorPayload(room, safeJsonParse<{ changes?: unknown[] }>(output));
 };
+
+export const runMemorySummary = async (args: {
+  room: RoomLike;
+  requesterId: string;
+  systemPrompt: string;
+  userPrompt: string;
+  temperature?: number;
+}) => {
+  const requester = getActivePlayers(args.room).find((player) => player.id === args.requesterId);
+  if (!requester) {
+    throw new Error("当前玩家不在房间中，无法执行记忆总结");
+  }
+  const connection = getEffectiveConnection(requester, "mainStory");
+  const output = await callChatCompletion({
+    provider: connection.provider,
+    endpoint: connection.endpoint,
+    apiKey: connection.apiKey,
+    model: connection.model,
+    temperature: Number.isFinite(Number(args.temperature))
+      ? Number(args.temperature)
+      : requester.aiSettings.mainStory.prompt.temperature,
+    systemPrompt: String(args.systemPrompt || "").trim(),
+    userPrompt: String(args.userPrompt || "").trim(),
+    modelPrompt: ""
+  });
+  return String(output || "").trim();
+};

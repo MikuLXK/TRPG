@@ -1,3 +1,11 @@
+import {
+  buildMemoryTask,
+  buildRoundMemoryEntries,
+  normalizeRoomMemoryConfig,
+  normalizeRoomMemorySystem,
+  writeRoomMemory
+} from "./memory";
+
 interface StorySegmentLike {
   groupId: string;
   visibleToPlayerIds: string[];
@@ -69,6 +77,22 @@ export const createTurnProcessor = (deps: {
       if (useProviderStream) {
         deps.io.to(roomId).emit("story_stream_end");
       }
+      const memoryConfig = normalizeRoomMemoryConfig(room.memoryConfig);
+      const memoryBase = normalizeRoomMemorySystem(room.memorySystem);
+      const { immediateEntry, shortEntry, round, timeText } = buildRoundMemoryEntries({
+        room,
+        storyPayload
+      });
+      room.memorySystem = writeRoomMemory({
+        memory: memoryBase,
+        config: memoryConfig,
+        immediateEntry,
+        shortEntry,
+        round,
+        recordTime: timeText
+      });
+      room.memoryConfig = memoryConfig;
+      room.memoryPendingTask = buildMemoryTask(room.memorySystem, memoryConfig);
       room.status = "settlement";
       deps.io.to(roomId).emit("room_updated", room);
       deps.io.emit("rooms_list_updated");

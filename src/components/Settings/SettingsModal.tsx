@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Monitor, MessageSquare, Server, Database, Save, Trash2, RefreshCw, LogOut, Cpu, BookOpen, Calculator, Link, Key, Box, Download } from 'lucide-react';
+import { X, Monitor, MessageSquare, Server, Database, Save, Trash2, RefreshCw, LogOut, Cpu, BookOpen, Calculator, Link, Key, Box, Download, Brain } from 'lucide-react';
 import { dbService } from '../../services/dbService';
 import { GameSettings, defaultSettings, AIFunctionType, AIProviderType } from '../../types/Settings';
 import { socketService } from '../../services/socketService';
@@ -15,7 +15,7 @@ interface SettingsModalProps {
   accountUsername?: string;
 }
 
-type Tab = 'visual' | 'prompt' | 'api' | 'storage';
+type Tab = 'visual' | 'prompt' | 'api' | 'memory' | 'storage';
 
 type PromptDefaults = Record<AIFunctionType, { system: string; user: string; model: string }>;
 
@@ -76,6 +76,13 @@ const mergeSettings = (base: GameSettings, saved: Partial<GameSettings>): GameSe
         },
       };
     });
+  }
+
+  if (saved.memory) {
+    merged.memory = {
+      ...merged.memory,
+      ...saved.memory,
+    };
   }
 
   return merged;
@@ -148,6 +155,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
       }
       if (roomId) {
         socketService.updatePlayerAIConfig(roomId, settings.ai);
+        socketService.updateRoomMemoryConfig(roomId, settings.memory);
       }
       showToast(successText, 'success');
     } catch {
@@ -200,6 +208,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
             <TabButton active={activeTab === 'visual'} onClick={() => setActiveTab('visual')} icon={<Monitor size={18} />} label="视觉与显示" />
             <TabButton active={activeTab === 'prompt'} onClick={() => setActiveTab('prompt')} icon={<MessageSquare size={18} />} label="AI 提示词管理" />
             <TabButton active={activeTab === 'api'} onClick={() => setActiveTab('api')} icon={<Server size={18} />} label="API 连接配置" />
+            <TabButton active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} icon={<Brain size={18} />} label="记忆系统配置" />
             <TabButton active={activeTab === 'storage'} onClick={() => setActiveTab('storage')} icon={<Database size={18} />} label="本地存储概览" />
 
             {onExitToHome && (
@@ -242,6 +251,13 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'visual', 
                 onChange={setSettings}
                 onSave={() => void saveSettings('API 连接配置已保存')}
                 showToast={showToast}
+              />
+            )}
+            {activeTab === 'memory' && (
+              <MemorySettings
+                settings={settings}
+                onChange={setSettings}
+                onSave={() => void saveSettings('记忆系统配置已保存')}
               />
             )}
             {activeTab === 'storage' && (
@@ -721,6 +737,103 @@ function ApiSettings({ settings, onChange, onSave, showToast }: { settings: Game
       <div className="flex justify-end pt-4 border-t border-zinc-800">
         <button onClick={onSave} className="flex items-center gap-2 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-zinc-950 rounded-lg font-bold transition-colors shadow-lg shadow-amber-900/20">
           <Save size={16} /> 保存连接配置
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MemorySettings({
+  settings,
+  onChange,
+  onSave
+}: {
+  settings: GameSettings;
+  onChange: React.Dispatch<React.SetStateAction<GameSettings>>;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-8">
+      <Section title="阈值配置">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <SettingItem label="即时记忆上限 (条)">
+            <input
+              type="number"
+              min={3}
+              max={100}
+              value={settings.memory.即时记忆上限}
+              onChange={(e) => {
+                const value = Math.max(3, Number(e.target.value) || 10);
+                onChange((prev) => ({ ...prev, memory: { ...prev.memory, 即时记忆上限: value } }));
+              }}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
+            />
+          </SettingItem>
+          <SettingItem label="短期记忆阈值 (条)">
+            <input
+              type="number"
+              min={5}
+              max={300}
+              value={settings.memory.短期记忆阈值}
+              onChange={(e) => {
+                const value = Math.max(5, Number(e.target.value) || 30);
+                onChange((prev) => ({ ...prev, memory: { ...prev.memory, 短期记忆阈值: value } }));
+              }}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
+            />
+          </SettingItem>
+          <SettingItem label="中期记忆阈值 (条)">
+            <input
+              type="number"
+              min={20}
+              max={500}
+              value={settings.memory.中期记忆阈值}
+              onChange={(e) => {
+                const value = Math.max(20, Number(e.target.value) || 50);
+                onChange((prev) => ({ ...prev, memory: { ...prev.memory, 中期记忆阈值: value } }));
+              }}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 focus:border-amber-500 outline-none font-mono text-xs"
+            />
+          </SettingItem>
+        </div>
+      </Section>
+
+      <Section title="总结提示词">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm text-zinc-400">短期→中期 总结提示词</label>
+            <textarea
+              value={settings.memory.短期转中期提示词}
+              onChange={(e) => onChange((prev) => ({
+                ...prev,
+                memory: {
+                  ...prev.memory,
+                  短期转中期提示词: e.target.value
+                }
+              }))}
+              className="w-full h-36 bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-zinc-300 text-sm leading-relaxed font-mono resize-none focus:border-amber-500 outline-none"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-zinc-400">中期→长期 总结提示词</label>
+            <textarea
+              value={settings.memory.中期转长期提示词}
+              onChange={(e) => onChange((prev) => ({
+                ...prev,
+                memory: {
+                  ...prev.memory,
+                  中期转长期提示词: e.target.value
+                }
+              }))}
+              className="w-full h-36 bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-zinc-300 text-sm leading-relaxed font-mono resize-none focus:border-amber-500 outline-none"
+            />
+          </div>
+        </div>
+      </Section>
+
+      <div className="flex justify-end pt-4 border-t border-zinc-800">
+        <button onClick={onSave} className="flex items-center gap-2 px-6 py-2 bg-amber-600 hover:bg-amber-500 text-zinc-950 rounded-lg font-bold transition-colors shadow-lg shadow-amber-900/20">
+          <Save size={16} /> 保存记忆配置
         </button>
       </div>
     </div>

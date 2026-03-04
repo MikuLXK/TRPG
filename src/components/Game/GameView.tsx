@@ -810,6 +810,7 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
                 aiStepText={aiStepText}
                 playerInputStates={playerInputStates}
                 selfSpeakerNames={selfSpeakerNames}
+                aiThinkingHistory={Array.isArray(roomState?.aiThinkingHistory) ? roomState.aiThinkingHistory : []}
                 streamingMode={streamingMode}
                 onToggleStreamingMode={handleToggleStreamingMode}
               />

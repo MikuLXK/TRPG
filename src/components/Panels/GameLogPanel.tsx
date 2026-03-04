@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react';
 import { 游戏日志 } from '../../types/gameData';
-import { Send, Waves, Ban } from 'lucide-react';
+import { Send, Waves, Ban, Brain, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface GameLogPanelProps {
@@ -21,6 +21,12 @@ interface GameLogPanelProps {
     action: string;
   }>;
   selfSpeakerNames?: string[];
+  aiThinkingHistory?: Array<{
+    round?: number;
+    thinking?: string;
+    source?: 'mainStory' | 'reroll' | string;
+    time?: string;
+  }>;
   streamingMode?: 'off' | 'provider';
   onToggleStreamingMode?: () => void;
 }
@@ -223,15 +229,24 @@ export default function GameLogPanel({
   aiStepText = '等待玩家输入',
   playerInputStates = [],
   selfSpeakerNames = [],
+  aiThinkingHistory = [],
   streamingMode = 'provider',
   onToggleStreamingMode,
 }: GameLogPanelProps) {
   const [inputText, setInputText] = useState('');
+  const [showThinkingModal, setShowThinkingModal] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const selfSpeakerSet = useMemo(() => new Set(selfSpeakerNames.map(normalizeName).filter(Boolean)), [selfSpeakerNames]);
   const displayEntries = useMemo(
     () => 日志列表.flatMap((log) => parseLogToEntries(log, selfSpeakerSet)),
     [日志列表, selfSpeakerSet]
+  );
+  const thinkingEntries = useMemo(
+    () =>
+      [...(Array.isArray(aiThinkingHistory) ? aiThinkingHistory : [])]
+        .filter((item) => String(item?.thinking || '').trim())
+        .reverse(),
+    [aiThinkingHistory]
   );
 
   useEffect(() => {
@@ -263,27 +278,46 @@ export default function GameLogPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar z-10" ref={scrollRef}>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 text-xs text-zinc-300 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <span className="text-zinc-500 mr-2">当前回合</span>
-              <span className="text-amber-400 font-semibold">第 {currentRound} 回合</span>
+        <div className="rounded-xl border border-zinc-800/90 bg-zinc-900/65 px-3 py-2 text-xs text-zinc-300">
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowThinkingModal(true)}
+              className="h-7 w-7 rounded-full border border-cyan-700/70 text-cyan-300 hover:bg-cyan-900/30 flex items-center justify-center"
+              title="查看AI思考"
+            >
+              <Brain size={13} />
+            </button>
+
+            <div className="flex justify-center">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-amber-500/45 bg-amber-500/10 text-amber-300 font-semibold text-[11px] tracking-wide">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                第 {currentRound} 回合
+              </div>
             </div>
-            <div className="text-zinc-400">状态：{roomStatus}</div>
+
+            <div className="justify-self-end text-[11px] text-zinc-400">状态：{roomStatus}</div>
           </div>
-          <div className="text-cyan-300">{aiStepText}</div>
-          <div className="flex flex-wrap gap-2">
-            {playerInputStates.map((player) => {
-              const actionPreview = player.action ? (player.action.length > 20 ? `${player.action.slice(0, 20)}...` : player.action) : '';
-              return (
-                <div key={player.id} className={`px-2 py-1 rounded-md border ${player.isReady ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>
+
+          <div className="mt-1.5 text-[11px] text-cyan-300/90 text-center truncate">{aiStepText}</div>
+
+          {playerInputStates.length > 0 && (
+            <div className="mt-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              {playerInputStates.map((player) => (
+                <div
+                  key={player.id}
+                  className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] ${
+                    player.isReady
+                      ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300'
+                      : 'border-zinc-700 bg-zinc-900 text-zinc-500'
+                  }`}
+                >
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${player.isReady ? 'bg-emerald-400' : 'bg-zinc-500'}`}></span>
                   <span>{player.name}</span>
-                  <span className="ml-1">{player.isReady ? '已提交' : '未提交'}</span>
-                  {actionPreview && <span className="ml-1 text-zinc-500">({actionPreview})</span>}
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <AnimatePresence>
@@ -414,6 +448,46 @@ export default function GameLogPanel({
           <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b border-l border-amber-500/50 rounded-bl-md pointer-events-none"></div>
         </div>
       </div>
+
+      {showThinkingModal && (
+        <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl h-[78%] bg-zinc-950 border border-cyan-700/50 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/70 flex items-center justify-between">
+              <div className="text-cyan-300 font-bold tracking-wider">AI思考过程（按回合）</div>
+              <button
+                type="button"
+                onClick={() => setShowThinkingModal(false)}
+                className="p-2 rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+              {thinkingEntries.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-sm text-zinc-500">暂无 AI 思考记录</div>
+              ) : (
+                thinkingEntries.map((item, idx) => {
+                  const roundText = Number.isFinite(Number(item?.round)) ? `第${Math.floor(Number(item?.round))}回合` : '未知回合';
+                  const sourceText = item?.source === 'reroll' ? '重Roll' : '主剧情';
+                  const timeText = String(item?.time || '').trim();
+                  return (
+                    <div
+                      key={`${item?.round || 'x'}-${timeText}-${idx}`}
+                      className="rounded-xl border border-zinc-700/70 bg-zinc-900/70 p-3"
+                    >
+                      <div className="text-xs text-cyan-300/90 mb-2">
+                        {roundText} · {sourceText}
+                        {timeText ? ` · ${timeText}` : ''}
+                      </div>
+                      <div className="text-sm text-zinc-100 whitespace-pre-wrap leading-relaxed">{String(item?.thinking || '').trim()}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

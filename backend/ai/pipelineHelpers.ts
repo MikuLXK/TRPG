@@ -301,18 +301,29 @@ export const normalizeStateProcessorPayload = (room: RoomLike, parsed: { changes
   const changes = Array.isArray(parsed?.changes)
     ? parsed.changes
         .map((item) => {
-          const playerId = String((item as any)?.playerId || "").trim();
           const rawPlayerSlot = Number((item as any)?.playerSlot ?? (item as any)?.slot ?? 0);
           const playerSlot = Number.isFinite(rawPlayerSlot) && rawPlayerSlot > 0 ? Math.floor(rawPlayerSlot) : undefined;
+          const playerIdRaw = String((item as any)?.playerId || "").trim();
+          const playerBySlot = playerSlot
+            ? room.players.find((player: any) => Number((player as any).playerSlot) === playerSlot)
+            : undefined;
+          const playerById = playerIdRaw
+            ? room.players.find((player) => player.id === playerIdRaw)
+            : undefined;
+          const resolvedPlayer = playerBySlot || playerById;
           const fields = (item as any)?.fields && typeof (item as any).fields === "object" ? (item as any).fields as Record<string, unknown> : {};
           const reason = String((item as any)?.reason || "").trim();
-          return { playerId, playerSlot, fields, reason };
+          const resolvedSlot = Number.isFinite(Number((resolvedPlayer as any)?.playerSlot))
+            ? Math.max(1, Math.floor(Number((resolvedPlayer as any).playerSlot)))
+            : playerSlot;
+          return {
+            playerId: String((resolvedPlayer as any)?.id || "").trim(),
+            playerSlot: resolvedSlot,
+            fields,
+            reason
+          };
         })
-        .filter((item) => {
-          if (item.playerId && room.players.some((player) => player.id === item.playerId)) return true;
-          if (item.playerSlot && room.players.some((player: any) => Number(player.playerSlot) === item.playerSlot)) return true;
-          return false;
-        })
+        .filter((item) => Boolean(item.playerId) || Boolean(item.playerSlot))
     : [];
   return { changes, statePatch };
 };

@@ -140,6 +140,7 @@ const deepMergeValue = (base: unknown, patch: unknown): unknown => {
 };
 
 const PUBLIC_STATE_COMMAND_PATTERN = /^\/(?:公共写入|pub|statepatch)\s+([\s\S]+)$/i;
+const STATE_SETTLEMENT_COMMAND_PATTERN = /^(?:状态结算[:：]\s*|\/(?:状态结算|settle|state_settlement)\s+)([\s\S]+)$/i;
 
 const parseJsonMaybeFenced = (value: string): AnyRecord | null => {
   const source = String(value || "").trim();
@@ -162,6 +163,23 @@ const extractPublicStatePatchCommand = (text: string) => {
   const patch = parseJsonMaybeFenced(String(match[1] || ""));
   if (!patch) return { ok: false as const, error: "公共写入命令格式错误，示例：/公共写入 {\"剧情\":{\"当前回合总述\":\"...\"}}" };
   return { ok: true as const, patch };
+};
+
+const extractStateSettlementCommand = (text: string) => {
+  const trimmed = String(text || "").trim();
+  const match = trimmed.match(STATE_SETTLEMENT_COMMAND_PATTERN);
+  if (!match) return null;
+  const payload = parseJsonMaybeFenced(String(match[1] || ""));
+  if (!payload) {
+    return { ok: false as const, error: "状态结算命令格式错误，示例：状态结算: {\"changes\":[...],\"statePatch\":{...}}" };
+  }
+  const hasChanges = Array.isArray((payload as any).changes) && (payload as any).changes.length > 0;
+  const rawPatch = (payload as any).statePatch ?? (payload as any).状态补丁 ?? (payload as any).stateTreePatch;
+  const hasPatch = isRecord(rawPatch);
+  if (!hasChanges && !hasPatch) {
+    return { ok: false as const, error: "状态结算命令无效：缺少 changes 或 statePatch" };
+  }
+  return { ok: true as const, payload };
 };
 
 const normalizeGameLog = (value: any): 游戏日志 | null => {
@@ -755,6 +773,46 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
       return;
     }
 
+    const settlementCommand = extractStateSettlementCommand(text);
+    if (settlementCommand) {
+      if (!roomState?.id) return;
+      if (!settlementCommand.ok) {
+        const warnLog: 游戏日志 = {
+          id: `${Date.now()}-settlement-error`,
+          发送者: '系统',
+          内容: settlementCommand.error,
+          类型: '系统',
+          时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        set游戏数据((prev) => ({
+          ...prev,
+          日志列表: [...prev.日志列表, warnLog]
+        }));
+        return;
+      }
+      void (async () => {
+        const result = await socketService.applyStateSettlement({
+          roomId: roomState.id,
+          payload: settlementCommand.payload,
+          reason: '前端状态结算命令'
+        });
+        if (!result.ok) {
+          const errLog: 游戏日志 = {
+            id: `${Date.now()}-settlement-fail`,
+            发送者: '系统',
+            内容: `状态结算执行失败：${result.error || '未知错误'}`,
+            类型: '系统',
+            时间戳: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          set游戏数据((prev) => ({
+            ...prev,
+            日志列表: [...prev.日志列表, errLog]
+          }));
+        }
+      })();
+      return;
+    }
+
     if (isReady) return;
 
     const newLog: 游戏日志 = {
@@ -993,4 +1051,3 @@ export default function GameView({ roomState, onExit, roomId, accountUsername = 
     </div>
   );
 }
-

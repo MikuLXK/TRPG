@@ -6,6 +6,7 @@ export const registerTurnEvents = (socket: any, deps: {
   rooms: Record<string, any>;
   io: any;
   getActivePlayers: (room: any) => Array<any>;
+  applyStateChanges: (room: any, changesInput: unknown) => void;
   processTurn: (roomId: string) => void;
   removePlayerFromRoom: (socketId: string) => void;
   runMainStory: (
@@ -35,6 +36,7 @@ export const registerTurnEvents = (socket: any, deps: {
     return next;
   };
   const MANUAL_PUBLIC_STATE_ROOT_KEYS = new Set(["环境", "社交", "战斗", "剧情", "任务列表", "约定列表", "记忆系统"]);
+  const STATE_SETTLEMENT_COMMAND_PATTERN = /^(?:状态结算[:：]\s*|\/(?:状态结算|settle|state_settlement)\s+)([\s\S]+)$/i;
   const pickCommandPublicPatch = (value: unknown): Record<string, unknown> | null => {
     if (!isRecord(value)) return null;
     const next: Record<string, unknown> = {};
@@ -43,6 +45,82 @@ export const registerTurnEvents = (socket: any, deps: {
       next[key] = value[key];
     }
     return Object.keys(next).length > 0 ? next : null;
+  };
+  const parseJsonMaybeFenced = (value: string) => {
+    const source = String(value || "").trim();
+    if (!source) return null;
+    const unfenced = source.startsWith("```")
+      ? source.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim()
+      : source;
+    try {
+      const parsed = JSON.parse(unfenced);
+      return isRecord(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  const pickStateSettlementPayload = (value: unknown): Record<string, unknown> | null => {
+    if (!isRecord(value)) return null;
+    const changeList = Array.isArray((value as any).changes) ? (value as any).changes : [];
+    const statePatchRaw =
+      (value as any).statePatch ??
+      (value as any).状态补丁 ??
+      (value as any).stateTreePatch;
+    const patch = pickCommandPublicPatch(statePatchRaw);
+    if (changeList.length === 0 && !patch) return null;
+    const next: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    if (patch) {
+      next.statePatch = patch;
+    } else {
+      delete next.statePatch;
+      delete (next as any).状态补丁;
+      delete (next as any).stateTreePatch;
+    }
+    return next;
+  };
+  const extractStateSettlementCommand = (text: string) => {
+    const source = String(text || "").trim();
+    if (!source) return null;
+    const match = source.match(STATE_SETTLEMENT_COMMAND_PATTERN);
+    if (!match) return null;
+    const parsed = parseJsonMaybeFenced(String(match[1] || ""));
+    if (!parsed) return { ok: false as const, error: "状态结算命令格式错误，示例：状态结算: {\"changes\":[...],\"statePatch\":{...}}" };
+    const payload = pickStateSettlementPayload(parsed);
+    if (!payload) return { ok: false as const, error: "状态结算命令无效：缺少 changes 或可写入公共 statePatch" };
+    return { ok: true as const, payload };
+  };
+  const applyStateSettlementCommand = (args: {
+    room: any;
+    roomId: string;
+    payload: Record<string, unknown>;
+    reason?: string;
+  }) => {
+    deps.applyStateChanges(args.room, args.payload);
+    const changes = Array.isArray((args.payload as any).changes) ? (args.payload as any).changes : [];
+    const slots = Array.from(
+      new Set(
+        changes
+          .map((item: any) => Number(item?.playerSlot ?? item?.slot ?? 0))
+          .filter((num: number) => Number.isFinite(num) && num > 0)
+          .map((num: number) => Math.floor(num))
+      )
+    ).sort((a, b) => a - b);
+    const patch = pickCommandPublicPatch((args.payload as any).statePatch ?? (args.payload as any).状态补丁 ?? (args.payload as any).stateTreePatch);
+    const labels: string[] = [];
+    if (slots.length > 0) labels.push(`玩家${slots.join("、")}`);
+    if (patch) labels.push(`公共状态:${Object.keys(patch).join("、")}`);
+    const summary = String(args.reason || "").trim() || "状态结算命令";
+    const newLog = {
+      id: `${Date.now()}-settlement-command`,
+      发送者: "系统",
+      内容: `状态结算已执行（${summary}）：${labels.join("；") || "已应用"}`,
+      类型: "系统",
+      时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      回合: Number(args.room.currentRound) || 1
+    };
+    args.room.logs.push(newLog);
+    deps.io.to(args.roomId).emit("new_log", newLog);
+    deps.io.to(args.roomId).emit("room_updated", args.room);
   };
 
   const getVoteStatusByPlayer = (room: any) => {
@@ -221,6 +299,45 @@ export const registerTurnEvents = (socket: any, deps: {
     }
   );
 
+  socket.on(
+    "apply_state_settlement",
+    (
+      {
+        roomId,
+        payload,
+        reason
+      }: {
+        roomId: string;
+        payload: Record<string, unknown>;
+        reason?: string;
+      },
+      callback?: (result: { ok: boolean; error?: string }) => void
+    ) => {
+      const room = deps.rooms[roomId];
+      if (!room) {
+        callback?.({ ok: false, error: "房间不存在" });
+        return;
+      }
+      const player = room.players.find((p: any) => p.id === socket.id);
+      if (!player) {
+        callback?.({ ok: false, error: "玩家不存在" });
+        return;
+      }
+      const commandPayload = pickStateSettlementPayload(payload);
+      if (!commandPayload) {
+        callback?.({ ok: false, error: "状态结算命令无效：缺少 changes 或可写入公共 statePatch" });
+        return;
+      }
+      applyStateSettlementCommand({
+        room,
+        roomId,
+        payload: commandPayload,
+        reason: String(reason || "").trim() || "前端状态结算命令"
+      });
+      callback?.({ ok: true });
+    }
+  );
+
   socket.on("chat_message", ({ roomId, message }: { roomId: string; message: string }) => {
     const room = deps.rooms[roomId];
     if (!room) return;
@@ -243,6 +360,20 @@ export const registerTurnEvents = (socket: any, deps: {
     if (!room) return;
     const player = room.players.find((p: any) => p.id === socket.id);
     if (!player) return;
+    const settlementCommand = extractStateSettlementCommand(action);
+    if (settlementCommand) {
+      if (!settlementCommand.ok) {
+        socket.emit("error", settlementCommand.error);
+        return;
+      }
+      applyStateSettlementCommand({
+        room,
+        roomId,
+        payload: settlementCommand.payload,
+        reason: "前端状态结算命令"
+      });
+      return;
+    }
     if (room.rerollVote) {
       socket.emit("error", "重Roll投票进行中，请先完成投票");
       return;

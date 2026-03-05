@@ -135,10 +135,31 @@ export const createTurnProcessor = (deps: {
 
       const changes = await deps.runStateProcessor(room, storyPayload, groupedActions);
       deps.applyStateChanges(room, changes);
+      const changeList = Array.isArray((changes as any)?.changes) ? (changes as any).changes : [];
+      const changedSlots = Array.from(
+        new Set(
+          changeList
+            .map((item: any) => Number(item?.playerSlot ?? item?.slot ?? 0))
+            .filter((num: number) => Number.isFinite(num) && num > 0)
+            .map((num: number) => Math.floor(num))
+        )
+      ).sort((a, b) => a - b);
+      const statePatchRaw =
+        (changes as any)?.statePatch ??
+        (changes as any)?.状态补丁 ??
+        (changes as any)?.stateTreePatch;
+      const patchKeys =
+        statePatchRaw && typeof statePatchRaw === "object" && !Array.isArray(statePatchRaw)
+          ? Object.keys(statePatchRaw as Record<string, unknown>)
+          : [];
+      const summaryParts: string[] = [];
+      if (changedSlots.length > 0) summaryParts.push(`玩家${changedSlots.join("、")}`);
+      if (patchKeys.length > 0) summaryParts.push(`公共状态:${patchKeys.join("、")}`);
+      const settlementSummary = summaryParts.join("；") || "无状态变化";
       room.logs.push({
         id: `${Date.now()}-state`,
         发送者: "系统",
-        内容: `状态结算: ${JSON.stringify(changes)}`,
+        内容: `状态结算已执行：${settlementSummary}`,
         类型: "系统",
         时间戳: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         回合: Number(room.currentRound) || 1

@@ -1154,6 +1154,7 @@ registerSocketHandlers({
   io,
   rooms,
   socketRoomIndex,
+  applyStateChanges,
   processTurn,
   removePlayerFromRoom,
   getActivePlayers,

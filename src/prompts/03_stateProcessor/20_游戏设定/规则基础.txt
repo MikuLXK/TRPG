@@ -10,8 +10,8 @@
 
 Change:
 {
-  "playerId": string,          // 优先
-  "playerSlot": number,        // 可选兜底
+  "playerSlot": number,        // 优先（按玩家序号定位）
+  "playerId": string,          // 可选兜底
   "fields": {
     "位置"?: string,
     "生命值"?: number,
@@ -52,4 +52,5 @@ Change:
 - `reason` 必须可追溯到对应叙事事实。
 - 同一玩家同回合多次变化可合并到一条 change。
 - 禁止同一字段在同回合互相矛盾（如同时加减同状态且无解释）。
+- 若 `playerSlot` 与 `playerId` 冲突，以 `playerSlot` 为准。
 </状态结算输出协议>

@@ -61,6 +61,7 @@ interface DisplayEntry {
 
 const TITLE_LINE_PATTERN = /^【[^】]+】\|【[^】]+】$/;
 const TAG_LINE_PATTERN = /^【([^】]+)】\s*(.*)$/;
+const STATE_SETTLEMENT_LOG_PATTERN = /^状态结算[:：]\s*/;
 const GAME_TIME_PATTERN_A = /\d{1,6}年\d{2}月\d{2}日\s+\d{2}:\d{2}/;
 const GAME_TIME_PATTERN_B = /^\d{1,6}:\d{2}:\d{2}:\d{2}:\d{2}$/;
 
@@ -220,6 +221,7 @@ const parseStoryJson = (payload: StoryPayload, log: 游戏日志, selfSpeakerSet
 const parseLogToEntries = (log: 游戏日志, selfSpeakerSet: Set<string>): DisplayEntry[] => {
   const content = String(log.内容 || '').trim();
   if (!content) return [];
+  if (log.发送者 === '系统' && STATE_SETTLEMENT_LOG_PATTERN.test(content)) return [];
 
   if (log.发送者 === '系统') {
     const payload = tryParseStoryPayload(content);
@@ -294,13 +296,13 @@ export default function GameLogPanel({
     const byRound = systemLogs.filter((log) => resolveRound(log.回合) === safeCurrentRound);
     if (byRound.length > 0) {
       if (isOpeningScene) return byRound.slice(0, 3);
-      const preferredByRound = [...byRound].reverse().filter((log) => !String(log.内容 || '').startsWith('状态结算:'));
+      const preferredByRound = [...byRound].reverse().filter((log) => !STATE_SETTLEMENT_LOG_PATTERN.test(String(log.内容 || '').trim()));
       if (preferredByRound.length > 0) return preferredByRound.slice(0, 3);
       return [...byRound].reverse().slice(0, 3);
     }
 
     if (isOpeningScene) return systemLogs.slice(0, 3);
-    const preferred = [...systemLogs].reverse().filter((log) => !String(log.内容 || '').startsWith('状态结算:'));
+    const preferred = [...systemLogs].reverse().filter((log) => !STATE_SETTLEMENT_LOG_PATTERN.test(String(log.内容 || '').trim()));
     if (preferred.length > 0) return preferred.slice(0, 3);
     return [...systemLogs].reverse().slice(0, 3);
   }, [日志列表, isOpeningScene, currentRound]);
@@ -592,4 +594,3 @@ export default function GameLogPanel({
     </div>
   );
 }
-

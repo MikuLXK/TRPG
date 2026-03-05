@@ -81,6 +81,18 @@ class SocketService {
     });
   }
 
+  applyStateSettlement(args: { roomId: string; payload: Record<string, unknown>; reason?: string }) {
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      if (!this.socket) {
+        resolve({ ok: false, error: "Socket 未连接" });
+        return;
+      }
+      this.socket.emit("apply_state_settlement", args, (payload: { ok: boolean; error?: string }) => {
+        resolve(payload || { ok: false, error: "状态结算无响应" });
+      });
+    });
+  }
+
   setRoomStreamingMode(roomId: string, mode: "off" | "provider") {
     this.socket?.emit("set_room_streaming_mode", { roomId, mode });
   }

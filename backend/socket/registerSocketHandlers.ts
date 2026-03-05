@@ -7,6 +7,7 @@ export const registerSocketHandlers = (deps: {
   io: any;
   rooms: Record<string, any>;
   socketRoomIndex: Record<string, string>;
+  applyStateChanges: (room: any, changesInput: unknown) => void;
   processTurn: (roomId: string) => void;
   removePlayerFromRoom: (socketId: string) => void;
   getActivePlayers: (room: any) => Array<any>;
@@ -83,6 +84,7 @@ export const registerSocketHandlers = (deps: {
       rooms: deps.rooms,
       io: deps.io,
       getActivePlayers: deps.getActivePlayers,
+      applyStateChanges: deps.applyStateChanges,
       processTurn: deps.processTurn,
       removePlayerFromRoom: deps.removePlayerFromRoom,
       runMainStory: deps.runMainStory,

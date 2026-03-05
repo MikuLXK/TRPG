@@ -65,6 +65,9 @@ const ROOM_SWEEP_INTERVAL_MS = 30 * 1000;
 
 app.use(cors());
 app.use(express.json());
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ ok: true, ts: Date.now() });
+});
 
 type AIFunctionType = "actionCollector" | "mainStory" | "stateProcessor";
 type PromptRole = "system" | "user" | "model";
